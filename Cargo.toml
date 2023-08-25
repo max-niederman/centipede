@@ -4,5 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+cidr = "0.2.2"
 clap = { version = "4.3.23", features = ["derive"] }
+ioctl-sys = "0.8.0"
 libc = "0.2.147"

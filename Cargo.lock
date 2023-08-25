@@ -70,9 +70,17 @@ dependencies = [
 name = "centipede"
 version = "0.1.0"
 dependencies = [
+ "cidr",
  "clap",
+ "ioctl-sys",
  "libc",
 ]
+
+[[package]]
+name = "cidr"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d18b093eba54c9aaa1e3784d4361eb2ba944cf7d0a932a830132238f483e8d8"
 
 [[package]]
 name = "clap"
@@ -153,6 +161,12 @@ name = "hermit-abi"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "443144c8cdadd93ebf52ddb4056d257f5b52c04d3c804e657d19eb73fc33668b"
+
+[[package]]
+name = "ioctl-sys"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bd11f3a29434026f5ff98c730b668ba74b1033637b8817940b54d040696133c"
 
 [[package]]
 name = "is-terminal"
