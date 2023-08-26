@@ -7,7 +7,6 @@ use std::{
     thread,
 };
 
-use centipede::tun;
 use cidr::IpInet;
 
 #[derive(Debug, clap::Parser)]
@@ -52,7 +51,6 @@ fn main() {
                 let n = dev.read(&mut buf).unwrap();
 
                 socket.send_to(&buf[..n], opt.remote).unwrap();
-                println!("sent packet of {n} bytes");
             }
         });
 
@@ -61,10 +59,8 @@ fn main() {
             let mut buf = [0u8; 1504];
             loop {
                 let (n, _) = socket.recv_from(&mut buf).unwrap();
-                println!("received packet of {n} bytes");
 
                 dev.write_all(&buf[..n]).unwrap();
-                dev.flush().unwrap();
             }
         });
     });
