@@ -34,10 +34,8 @@ pub struct Config {
     pub forward_window: usize,
 }
 
-impl Dispatcher for RaceAllDispatcher {
-    type Config = Config;
-
-    fn new(config: Self::Config, links: Vec<LinkId>) -> Self {
+impl RaceAllDispatcher {
+    fn new(config: Config, links: Vec<LinkId>) -> Self {
         Self {
             config,
 
@@ -49,7 +47,9 @@ impl Dispatcher for RaceAllDispatcher {
             seen_center: AtomicU64::new(0),
         }
     }
+}
 
+impl Dispatcher for RaceAllDispatcher {
     fn dispatch_incoming(&self, nonce: Nonce) -> IncomingAction {
         let seq = u64::from_be_bytes(nonce);
         let old_center = self.seen_center.fetch_max(seq, Ordering::SeqCst);

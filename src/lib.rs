@@ -1,5 +1,6 @@
 pub mod dispatcher;
 pub mod message;
+pub mod worker;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LinkId(pub u32);

@@ -31,37 +31,4 @@ struct Opt {
 fn main() {
     let opt = <Opt as clap::Parser>::parse();
     dbg!(&opt);
-
-    let socket = UdpSocket::bind(opt.local).unwrap();
-
-    let c_if_name = CString::new(opt.if_name.as_bytes()).unwrap();
-
-    let dev = tun::Device::new(Some(c_if_name)).unwrap();
-    dev.set_address(opt.address.address())
-        .expect("failed to set address");
-    dev.set_netmask(opt.address.network())
-        .expect("failed to set netmask");
-    dev.bring_up().expect("failed to bring interface up");
-
-    thread::scope(|s| {
-        s.spawn(|| {
-            let mut dev = dev.handle();
-            let mut buf = [0u8; 1504];
-            loop {
-                let n = dev.read(&mut buf).unwrap();
-
-                socket.send_to(&buf[..n], opt.remote).unwrap();
-            }
-        });
-
-        s.spawn(|| {
-            let mut dev = dev.handle();
-            let mut buf = [0u8; 1504];
-            loop {
-                let (n, _) = socket.recv_from(&mut buf).unwrap();
-
-                dev.write_all(&buf[..n]).unwrap();
-            }
-        });
-    });
 }

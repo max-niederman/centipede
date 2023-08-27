@@ -1,17 +1,10 @@
 pub mod race_all;
 
-use std::net::{SocketAddr, UdpSocket};
-
 use crate::LinkId;
 
 pub type Nonce = [u8; 8];
 
 pub trait Dispatcher: Sync {
-    type Config;
-
-    /// Create a new dispatcher over a set of links.
-    fn new(config: Self::Config, links: Vec<LinkId>) -> Self;
-
     /// Dispatch an incoming packet.
     fn dispatch_incoming(&self, nonce: Nonce) -> IncomingAction;
 
@@ -34,4 +27,21 @@ pub enum IncomingAction {
 pub struct OutgoingAction {
     pub link: LinkId,
     pub nonce: Nonce,
+}
+
+impl<'a, D> Dispatcher for &'a D
+where
+    D: Dispatcher,
+{
+    fn dispatch_incoming(&self, nonce: Nonce) -> IncomingAction {
+        (**self).dispatch_incoming(nonce)
+    }
+
+    fn dispatch_outgoing(&self, packet: &[u8]) -> Self::OutgoingActionIter<'_> {
+        (**self).dispatch_outgoing(packet)
+    }
+
+    type OutgoingActionIter<'d> = <D as Dispatcher>::OutgoingActionIter<'d>
+    where
+        Self: 'd;
 }
