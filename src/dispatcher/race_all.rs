@@ -50,8 +50,8 @@ impl Dispatcher for RaceAllDispatcher {
         }
     }
 
-    fn dispatch_incoming(&self, nonce: [u8; 12]) -> IncomingAction {
-        let seq = u64::from_be_bytes(nonce[4..].try_into().unwrap());
+    fn dispatch_incoming(&self, nonce: Nonce) -> IncomingAction {
+        let seq = u64::from_be_bytes(nonce);
         let old_center = self.seen_center.fetch_max(seq, Ordering::SeqCst);
 
         // The packet is in or ahead of the forward window.
@@ -108,10 +108,10 @@ impl<'d> Iterator for OutgoingActionIter<'d> {
                 // Remove the link from the list for the next iteration.
                 self.links = &self.links[1..];
 
-                let mut nonce = [0u8; 12];
-                nonce[4..].copy_from_slice(&self.seq.to_be_bytes());
-
-                Some(OutgoingAction { link, nonce })
+                Some(OutgoingAction {
+                    link,
+                    nonce: self.seq.to_be_bytes(),
+                })
             }
         }
     }
