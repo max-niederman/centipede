@@ -4,11 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-async-executor = "1.5.1"
-async-io = "1.13.0"
-chacha20poly1305 = "0.10.1"
+chacha20poly1305 = { version = "0.10.1", features = ["std"] }
 cidr = "0.2.2"
 clap = { version = "4.3.23", features = ["derive"] }
-futures-lite = "1.13.0"
+flurry = "0.4.0"
+log = "0.4.20"
+mio = { version = "0.8.8", features = ["os-poll", "os-ext"] }
 socket2 = { version = "0.5.3", features = ["all"] }
+thiserror = "1.0.47"
 tun = "0.5.5"

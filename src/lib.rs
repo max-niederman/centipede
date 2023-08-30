@@ -1,12 +1,14 @@
-pub mod dispatcher;
+#![feature(never_type)]
+#![feature(iterator_try_collect)]
+#![feature(maybe_uninit_slice)]
+#![feature(maybe_uninit_uninit_array)]
+
+use std::num::NonZeroU32;
+
 pub mod message;
-pub mod worker;
+pub mod receiver;
+pub mod sender;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct LinkId(pub u32);
-
-impl LinkId {
-    pub fn to_be_bytes(self) -> [u8; 4] {
-        self.0.to_be_bytes()
-    }
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
+pub struct EndpointId(pub NonZeroU32);
