@@ -19,6 +19,10 @@ pub struct State {
     /// Endpoints on the same tunnel share ownership of one memory.
     recv_memory: flurry::HashMap<EndpointId, Arc<PacketMemory>>,
 
+    /// Map of receiving endpoints to opposite send tunnels.
+    /// This is used to update the send tunnels' remote addresses.
+    recv_endpoint_to_opposite_tunnel: flurry::HashMap<EndpointId, TunnelId>,
+
     /// Set of sending tunnels.
     send_tunnels: flurry::HashMap<TunnelId, SendTunnel>,
 }
@@ -85,10 +89,10 @@ impl<'s> StateTransitioner<'s> {
     /// Delete a receive tunnel.
     fn delete_receive_tunnel(&mut self, id: TunnelId) -> Vec<EndpointId> {
         // Remove the endpoints from the transitioner's state.
-        let endpoints = match self.recv_tunnels.remove(&id) {
-            Some(endpoints) => endpoints,
-            None => panic!("tunnel does not exist"),
-        };
+        let endpoints = self
+            .recv_tunnels
+            .remove(&id)
+            .expect("tunnel does not exist");
 
         // Remove the endpoints from the recv_ciphers index.
         {
@@ -103,6 +107,15 @@ impl<'s> StateTransitioner<'s> {
             let recv_memory = self.state.recv_memory.pin();
             for endpoint in endpoints.iter() {
                 recv_memory.remove(endpoint);
+            }
+        }
+
+        // Remove the endpoints from the recv_endpoint_to_opposite_tunnel index.
+        {
+            let recv_endpoint_to_opposite_tunnel =
+                self.state.recv_endpoint_to_opposite_tunnel.pin();
+            for endpoint in endpoints.iter() {
+                recv_endpoint_to_opposite_tunnel.remove(endpoint);
             }
         }
 
@@ -146,6 +159,26 @@ impl<'s> StateTransitioner<'s> {
         let send_tunnels = self.state.send_tunnels.pin();
         assert!(send_tunnels.get(&id).is_some(), "tunnel does not exist");
         send_tunnels.remove(&id);
+    }
+
+    /// Sets or unsets the opposing send tunnel of a receive tunnel.
+    ///
+    /// # Panics
+    /// The receive tunnel must exist.
+    /// If the send tunnel does not exist, workers will panic when they try to update the remote address.
+    fn set_opposition(&self, receive: TunnelId, send: Option<TunnelId>) {
+        let recv_endpoints = self
+            .recv_tunnels
+            .get(&receive)
+            .expect("receive tunnel does not exist");
+
+        let recv_to_opposite = self.state.recv_endpoint_to_opposite_tunnel.pin();
+        for endpoint in recv_endpoints.iter() {
+            match send {
+                Some(send) => recv_to_opposite.insert(*endpoint, send),
+                None => recv_to_opposite.remove(endpoint),
+            };
+        }
     }
 }
 
