@@ -7,10 +7,12 @@ use crate::{EndpointId, TunnelId};
 use packet_memory::PacketMemory;
 
 mod packet_memory;
+pub mod message;
+pub mod worker;
 
 pub struct State {
     /// Local addresses on which to receive messages.
-    recv_addrs: Vec<Socket>,
+    recv_addrs: Vec<SocketAddr>, // TODO: dynamic swapping
 
     /// Ciphers with which to decrypt messages, by receiving endpoint.
     recv_ciphers: flurry::HashMap<EndpointId, ChaCha20Poly1305>,
@@ -29,13 +31,13 @@ pub struct State {
 
 struct SendTunnel {
     /// Local addresses over which to send messages.
-    local_addrs: Vec<SockAddr>, // TODO: use an atomic Box for lock-free swapping
+    local_addrs: Vec<SockAddr>, // TODO: dynamic swapping
 
     /// Ciphers with which to encrypt messages, by sending endpoint.
     ciphers: HashMap<EndpointId, ChaCha20Poly1305>,
 
     /// Addresses of the remote endpoints.
-    remote_addrs: flurry::HashMap<EndpointId, SockAddr>,
+    remote_addrs: flurry::HashMap<EndpointId, SocketAddr>,
 }
 
 /// A handle to the state of the tunnel used to mutate it.
@@ -136,7 +138,7 @@ impl<'s> StateTransitioner<'s> {
         let mut remote_addrs = Vec::with_capacity(endpoints.len());
         for (endpoint, remote_addr, cipher) in endpoints.into_iter() {
             ciphers.insert(endpoint, cipher);
-            remote_addrs.push((endpoint, SockAddr::from(remote_addr)));
+            remote_addrs.push((endpoint, remote_addr));
         }
 
         let tunnel = SendTunnel {
@@ -181,84 +183,3 @@ impl<'s> StateTransitioner<'s> {
         }
     }
 }
-
-// impl State {
-
-//     /// Worker loop for receiving packets.
-//     pub fn worker(&self, mut tun_queue: tun::platform::Queue) -> io::Result<!> {
-//         // Create a mio poller.
-//         let mut poll = Poll::new()?;
-//         let mut events = mio::Events::with_capacity(1024);
-
-//         // Bind to each listen address.
-//         let sockets: Vec<_> = self.listen_addrs.iter().map(bind_socket).try_collect()?;
-
-//         // Register all sockets with the poller.
-//         for (i, socket) in sockets.iter().enumerate() {
-//             poll.registry().register(
-//                 &mut SourceFd(&socket.as_raw_fd()),
-//                 mio::Token(i),
-//                 mio::Interest::READABLE,
-//             )?;
-//         }
-
-//         loop {
-//             poll.poll(&mut events, None)?;
-
-//             for event in events.iter() {
-//                 let socket = &sockets[event.token().0];
-
-//                 let mut buf = MaybeUninit::uninit_array::<{ message::MTU }>();
-//                 let (len, addr) = socket.recv_from(&mut buf)?; // TODO: does this need to be non-blocking?
-//                 let datagram = unsafe { MaybeUninit::slice_assume_init_mut(&mut buf[..len]) };
-
-//                 let message = match Message::parse(datagram) {
-//                     Ok(message) => message,
-//                     Err(e) => {
-//                         log::warn!("failed to parse message: {}", e);
-//                         continue;
-//                     }
-//                 };
-
-//                 let cipher_guard = self.ciphers.guard();
-
-//                 let cipher = match self.ciphers.get(&message.link, &cipher_guard) {
-//                     Some(cipher) => cipher,
-//                     None => {
-//                         log::warn!("received message for unknown endpoint");
-//                         continue;
-//                     }
-//                 };
-
-//                 let message = match Message::decode(cipher, datagram) {
-//                     Ok(message) => message,
-//                     Err(e) => {
-//                         log::warn!("failed to decode message: {}", e);
-//                         continue;
-//                     }
-//                 };
-
-//                 drop(cipher_guard);
-
-//                 match self.deduplicator.observe(message.seq) {
-//                     Some(PacketRecollection::Seen) | None => {}
-//                     Some(PacketRecollection::New) => {
-//                         tun_queue.write(&message.packet)?;
-//                     }
-//                 }
-//             }
-//         }
-//     }
-// }
-
-// fn bind_socket(addr: &SocketAddr) -> io::Result<Socket> {
-//     let socket = Socket::new(Domain::IPV4, socket2::Type::DGRAM, None)?;
-
-//     // Each worker will bind to the same addresses.
-//     socket.set_reuse_address(true)?;
-//     socket.set_reuse_port(true)?;
-
-//     socket.bind(&(*addr).into())?;
-
-//     Ok(socket)
-// }

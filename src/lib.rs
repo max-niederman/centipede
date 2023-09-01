@@ -13,4 +13,4 @@ pub struct EndpointId(pub NonZeroU32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
-pub struct TunnelId(pub u64);
+pub struct TunnelId(pub NonZeroU32);

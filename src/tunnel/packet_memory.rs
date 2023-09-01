@@ -31,7 +31,7 @@ impl PacketMemory {
 
     /// Observes a packet with the given sequence number,
     /// returning whether it's been seen before, if possible.
-    fn observe(&self, seq: u64) -> Option<PacketRecollection> {
+    pub fn observe(&self, seq: u64) -> Option<PacketRecollection> {
         let old_last = self.seen_last.fetch_max(seq, Ordering::SeqCst);
 
         // The packet is in or ahead of the forward window.
@@ -61,7 +61,7 @@ impl PacketMemory {
     }
 }
 
-enum PacketRecollection {
+pub enum PacketRecollection {
     New,
     Seen,
 }
