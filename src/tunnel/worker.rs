@@ -1,24 +1,33 @@
 use std::{
     collections::HashMap,
-    io::{self, Write},
+    io::{self, Read, Write},
     mem::MaybeUninit,
     net::SocketAddr,
+    os::fd::AsRawFd,
+    sync::atomic::Ordering,
 };
 
 use mio::{unix::SourceFd, Poll};
 use socket2::{SockAddr, Socket};
 
-use super::{
-    message::{self, Message},
-    packet_memory::PacketRecollection,
-    State,
-};
+use super::{message::Message, packet_memory::PacketRecollection, State};
 
+// TODO: make this configurable or use path MTU discovery
+const BUFFER_SIZE: usize = 64 * 1024;
+
+/// The entrypoint for each tunnel worker.
 pub fn entrypoint(state: &State, mut tun_queue: tun::platform::Queue) -> io::Result<!> {
+    // Ensure the passed TUN queue is correctly configured.
+    tun_queue.set_nonblock()?;
+    assert!(!tun_queue.has_packet_information());
+
+    // Create a mio poller and event queue.
     let mut poll = Poll::new()?;
     let mut events = mio::Events::with_capacity(1024);
 
-    let mut recv_sockets: Vec<_> = state
+    // TODO: dynamic swapping
+    // Bind each of the receive sockets.
+    let recv_sockets: Vec<_> = state
         .recv_addrs
         .iter()
         .copied()
@@ -27,20 +36,80 @@ pub fn entrypoint(state: &State, mut tun_queue: tun::platform::Queue) -> io::Res
 
     let mut send_sockets: HashMap<SocketAddr, Socket> = HashMap::new();
 
+    // Register the TUN device with the poller.
+    poll.registry().register(
+        &mut SourceFd(&tun_queue.as_raw_fd()),
+        TUN_TOKEN,
+        mio::Interest::READABLE,
+    )?;
+
+    // Register the receive sockets with the poller.
+    for (i, socket) in recv_sockets.iter().enumerate() {
+        poll.registry().register(
+            &mut SourceFd(&socket.as_raw_fd()),
+            mio::Token(i),
+            mio::Interest::READABLE,
+        )?;
+    }
+
     loop {
         poll.poll(&mut events, None)?;
 
         for event in events.iter() {
             match event.token() {
                 TUN_TOKEN => {
-                    todo!()
+                    let mut packet_buf = [0; BUFFER_SIZE];
+                    let len = tun_queue.read(&mut packet_buf)?;
+                    let packet = &packet_buf[..len];
+
+                    let tunnels_guard = state.send_tunnels.guard();
+
+                    // TODO: routing
+                    // Iterate over each send tunnel.
+                    for tunnel in state.send_tunnels.values(&tunnels_guard) {
+                        let remote_addrs_guard = tunnel.remote_addrs.guard();
+
+                        // Get the unique sequence number for this packet.
+                        let sequence_number =
+                            tunnel.next_sequence_number.fetch_add(1, Ordering::Relaxed);
+
+                        for (&endpoint, cipher) in tunnel.ciphers.iter() {
+                            let message = Message {
+                                endpoint,
+                                sequence_number,
+                                packet,
+                            };
+
+                            // Encode the message.
+                            let mut encoded_buf = [0; BUFFER_SIZE];
+                            let encoded: &_ = message.encode(cipher, &mut encoded_buf).unwrap();
+
+                            // Get the remote addresses for this endpoint.
+                            let remote_addr = SockAddr::from(
+                                *tunnel
+                                    .remote_addrs
+                                    .get(&endpoint, &remote_addrs_guard)
+                                    .expect("endpoint and remote addresses are in sync"),
+                            );
+
+                            // Iterate over each local address.
+                            for &local_addr in tunnel.local_addrs.iter() {
+                                // Get the local socket.
+                                let socket =
+                                    get_or_bind_send_socket(&mut send_sockets, local_addr)?;
+
+                                // Send the message.
+                                socket.send_to(encoded, &remote_addr)?;
+                            }
+                        }
+                    }
                 }
                 mio::Token(recv_socket_index) => {
                     let socket = &recv_sockets[recv_socket_index];
 
                     // Receive a datagram.
-                    let mut buf = MaybeUninit::uninit_array::<{ message::MTU }>();
-                    let (len, addr) = socket.recv_from(&mut buf)?; // TODO: does this need to be non-blocking?
+                    let mut buf = MaybeUninit::uninit_array::<{ BUFFER_SIZE }>();
+                    let (len, _) = socket.recv_from(&mut buf)?; // TODO: does this need to be non-blocking?
                     let datagram = unsafe { MaybeUninit::slice_assume_init_mut(&mut buf[..len]) };
 
                     // Parse the message header.
@@ -89,37 +158,6 @@ pub fn entrypoint(state: &State, mut tun_queue: tun::platform::Queue) -> io::Res
                     }
 
                     drop(recv_memory_guard);
-
-                    // Update the opposite endpoint's remote address.
-
-                    // The message specifies an opposite endpoint.
-                    if let Some(opposite_endpoint) = message.opposite_endpoint {
-                        // The receive tunnel has an opposite tunnel.
-                        if let Some(&opposite_tunnel_id) = state
-                            .recv_endpoint_to_opposite_tunnel
-                            .pin()
-                            .get(&message.endpoint)
-                        {
-                            // The opposite tunnel still exists.
-                            if let Some(opposite_tunnel) =
-                                state.send_tunnels.pin().get(&opposite_tunnel_id)
-                            {
-                                let remote_addrs = opposite_tunnel.remote_addrs.pin();
-
-                                // The opposite tunnel has the specified endpoint.
-                                if let Some(&old_remote_addr) = remote_addrs.get(&opposite_endpoint)
-                                {
-                                    let sender_addr = addr.as_socket().unwrap();
-
-                                    if old_remote_addr != sender_addr {
-                                        remote_addrs.insert(opposite_endpoint, sender_addr);
-                                    }
-                                } else {
-                                    log::warn!("received message specifying nonexistent endpoint as opposite");
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -139,6 +177,9 @@ fn bind_recv_socket(addr: SocketAddr) -> io::Result<Socket> {
 
     // Bind the socket to the address.
     socket.bind(&addr.into())?;
+
+    // Set the socket to non-blocking mode.
+    socket.set_nonblocking(true)?;
 
     Ok(socket)
 }
@@ -160,41 +201,12 @@ fn get_or_bind_send_socket(
         // Bind the socket to the address.
         socket.bind(&addr.into())?;
 
+        // Set the socket to non-blocking mode.
+        socket.set_nonblocking(true)?;
+
         // Add the socket to the map.
         sockets.insert(addr, socket);
     }
 
     Ok(sockets.get(&addr).unwrap())
 }
-
-// impl State {
-
-//     /// Worker loop for receiving packets.
-//     pub fn worker(&self, mut tun_queue: tun::platform::Queue) -> io::Result<!> {
-//         // Create a mio poller.
-//         let mut poll = Poll::new()?;
-//         let mut events = mio::Events::with_capacity(1024);
-
-//         // Bind to each listen address.
-//         let sockets: Vec<_> = self.listen_addrs.iter().map(bind_socket).try_collect()?;
-
-//         // Register all sockets with the poller.
-//         for (i, socket) in sockets.iter().enumerate() {
-//             poll.registry().register(
-//                 &mut SourceFd(&socket.as_raw_fd()),
-//                 mio::Token(i),
-//                 mio::Interest::READABLE,
-//             )?;
-//         }
-
-//         loop {
-//             poll.poll(&mut events, None)?;
-
-//             for event in events.iter() {
-//                 let socket = &sockets[event.token().0];
-
-//
-//             }
-//         }
-//     }
-// }

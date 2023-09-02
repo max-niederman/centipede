@@ -1,4 +1,8 @@
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::{atomic::AtomicU64, Arc},
+};
 
 use chacha20poly1305::ChaCha20Poly1305;
 use socket2::{SockAddr, Socket};
@@ -6,8 +10,8 @@ use socket2::{SockAddr, Socket};
 use crate::{EndpointId, TunnelId};
 use packet_memory::PacketMemory;
 
-mod packet_memory;
 pub mod message;
+mod packet_memory;
 pub mod worker;
 
 pub struct State {
@@ -21,23 +25,23 @@ pub struct State {
     /// Endpoints on the same tunnel share ownership of one memory.
     recv_memory: flurry::HashMap<EndpointId, Arc<PacketMemory>>,
 
-    /// Map of receiving endpoints to opposite send tunnels.
-    /// This is used to update the send tunnels' remote addresses.
-    recv_endpoint_to_opposite_tunnel: flurry::HashMap<EndpointId, TunnelId>,
-
     /// Set of sending tunnels.
     send_tunnels: flurry::HashMap<TunnelId, SendTunnel>,
 }
 
 struct SendTunnel {
-    /// Local addresses over which to send messages.
-    local_addrs: Vec<SockAddr>, // TODO: dynamic swapping
+    /// Local addresses over which to send messages,
+    /// along with an optional endpoint to send as the opposite endpoint.
+    local_addrs: Vec<SocketAddr>, // TODO: dynamic swapping
 
     /// Ciphers with which to encrypt messages, by sending endpoint.
     ciphers: HashMap<EndpointId, ChaCha20Poly1305>,
 
     /// Addresses of the remote endpoints.
     remote_addrs: flurry::HashMap<EndpointId, SocketAddr>,
+
+    /// The next sequence number.
+    next_sequence_number: AtomicU64,
 }
 
 /// A handle to the state of the tunnel used to mutate it.
@@ -112,15 +116,6 @@ impl<'s> StateTransitioner<'s> {
             }
         }
 
-        // Remove the endpoints from the recv_endpoint_to_opposite_tunnel index.
-        {
-            let recv_endpoint_to_opposite_tunnel =
-                self.state.recv_endpoint_to_opposite_tunnel.pin();
-            for endpoint in endpoints.iter() {
-                recv_endpoint_to_opposite_tunnel.remove(endpoint);
-            }
-        }
-
         endpoints
     }
 
@@ -142,9 +137,10 @@ impl<'s> StateTransitioner<'s> {
         }
 
         let tunnel = SendTunnel {
-            local_addrs: local_addrs.into_iter().map(SockAddr::from).collect(),
+            local_addrs,
             ciphers,
             remote_addrs: remote_addrs.into_iter().collect(),
+            next_sequence_number: AtomicU64::new(0),
         };
 
         let send_tunnels = self.state.send_tunnels.pin();
@@ -161,25 +157,5 @@ impl<'s> StateTransitioner<'s> {
         let send_tunnels = self.state.send_tunnels.pin();
         assert!(send_tunnels.get(&id).is_some(), "tunnel does not exist");
         send_tunnels.remove(&id);
-    }
-
-    /// Sets or unsets the opposing send tunnel of a receive tunnel.
-    ///
-    /// # Panics
-    /// The receive tunnel must exist.
-    /// If the send tunnel does not exist, workers will panic when they try to update the remote address.
-    fn set_opposition(&self, receive: TunnelId, send: Option<TunnelId>) {
-        let recv_endpoints = self
-            .recv_tunnels
-            .get(&receive)
-            .expect("receive tunnel does not exist");
-
-        let recv_to_opposite = self.state.recv_endpoint_to_opposite_tunnel.pin();
-        for endpoint in recv_endpoints.iter() {
-            match send {
-                Some(send) => recv_to_opposite.insert(*endpoint, send),
-                None => recv_to_opposite.remove(endpoint),
-            };
-        }
     }
 }
