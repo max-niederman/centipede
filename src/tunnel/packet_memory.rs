@@ -45,7 +45,9 @@ impl PacketMemory {
             Some(PacketRecollection::New)
         }
         // The packet is in the backward window.
-        else if seq >= old_last - self.backward_window as u64 {
+        else if (self.backward_window as u64 > old_last)
+            || seq >= old_last - self.backward_window as u64
+        {
             let already_seen = self.seen_packets.set(seq as usize, true);
 
             if already_seen {

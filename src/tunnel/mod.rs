@@ -44,6 +44,28 @@ struct SendTunnel {
     next_sequence_number: AtomicU64,
 }
 
+impl State {
+    /// Create a new state.
+    pub fn new(recv_addrs: Vec<SocketAddr>) -> Self {
+        Self {
+            recv_addrs,
+            recv_ciphers: flurry::HashMap::new(),
+            recv_memory: flurry::HashMap::new(),
+            send_tunnels: flurry::HashMap::new(),
+        }
+    }
+
+    /// Create a new state transitioner.
+    /// 
+    /// It is usually a logic error for multiple transitioners to exist simultaneously.
+    pub fn transitioner(&self) -> StateTransitioner<'_> {
+        StateTransitioner {
+            state: self,
+            recv_tunnels: HashMap::new(),
+        }
+    }
+}
+
 /// A handle to the state of the tunnel used to mutate it.
 ///
 /// While it is _safe_ for multiple [`StateTransitioner`]s to exist at the same time,
@@ -60,7 +82,7 @@ impl<'s> StateTransitioner<'s> {
     ///
     /// # Panics
     /// This tunnel ID must not already exist.
-    fn create_receive_tunnel(
+    pub fn create_receive_tunnel(
         &mut self,
         id: TunnelId,
         endpoints: Vec<(EndpointId, ChaCha20Poly1305)>,
@@ -93,7 +115,7 @@ impl<'s> StateTransitioner<'s> {
     }
 
     /// Delete a receive tunnel.
-    fn delete_receive_tunnel(&mut self, id: TunnelId) -> Vec<EndpointId> {
+    pub fn delete_receive_tunnel(&mut self, id: TunnelId) -> Vec<EndpointId> {
         // Remove the endpoints from the transitioner's state.
         let endpoints = self
             .recv_tunnels
@@ -123,7 +145,7 @@ impl<'s> StateTransitioner<'s> {
     ///
     /// # Panics
     /// This tunnel ID must not already exist.
-    fn create_send_tunnel(
+    pub fn create_send_tunnel(
         &mut self,
         id: TunnelId,
         local_addrs: Vec<SocketAddr>,
@@ -153,7 +175,7 @@ impl<'s> StateTransitioner<'s> {
     ///
     /// # Panics
     /// This tunnel ID must exist.
-    fn delete_send_tunnel(&mut self, id: TunnelId) {
+    pub fn delete_send_tunnel(&mut self, id: TunnelId) {
         let send_tunnels = self.state.send_tunnels.pin();
         assert!(send_tunnels.get(&id).is_some(), "tunnel does not exist");
         send_tunnels.remove(&id);

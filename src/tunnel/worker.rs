@@ -5,10 +5,14 @@ use std::{
     net::SocketAddr,
     os::fd::AsRawFd,
     sync::atomic::Ordering,
+    task::Poll,
 };
 
-use mio::{unix::SourceFd, Poll};
+use mio::unix::SourceFd;
 use socket2::{SockAddr, Socket};
+use thiserror::Error;
+
+use crate::tun;
 
 use super::{message::Message, packet_memory::PacketRecollection, State};
 
@@ -16,13 +20,11 @@ use super::{message::Message, packet_memory::PacketRecollection, State};
 const BUFFER_SIZE: usize = 64 * 1024;
 
 /// The entrypoint for each tunnel worker.
-pub fn entrypoint(state: &State, mut tun_queue: tun::platform::Queue) -> io::Result<!> {
-    // Ensure the passed TUN queue is correctly configured.
-    tun_queue.set_nonblock()?;
-    assert!(!tun_queue.has_packet_information());
+pub fn entrypoint(state: &State, tun_queue: &tun::Device) -> Result<!, Error> {
+    // TODO: Ensure the passed TUN queue is correctly configured, once we use a seperate tun lib.
 
     // Create a mio poller and event queue.
-    let mut poll = Poll::new()?;
+    let mut poll = mio::Poll::new().map_err(Error::EventLoopCreation)?;
     let mut events = mio::Events::with_capacity(1024);
 
     // TODO: dynamic swapping
@@ -37,29 +39,36 @@ pub fn entrypoint(state: &State, mut tun_queue: tun::platform::Queue) -> io::Res
     let mut send_sockets: HashMap<SocketAddr, Socket> = HashMap::new();
 
     // Register the TUN device with the poller.
-    poll.registry().register(
-        &mut SourceFd(&tun_queue.as_raw_fd()),
-        TUN_TOKEN,
-        mio::Interest::READABLE,
-    )?;
+    poll.registry()
+        .register(
+            &mut SourceFd(&tun_queue.as_raw_fd()),
+            TUN_TOKEN,
+            mio::Interest::READABLE,
+        )
+        .map_err(Error::EventLoopCreation)?;
 
     // Register the receive sockets with the poller.
     for (i, socket) in recv_sockets.iter().enumerate() {
-        poll.registry().register(
-            &mut SourceFd(&socket.as_raw_fd()),
-            mio::Token(i),
-            mio::Interest::READABLE,
-        )?;
+        poll.registry()
+            .register(
+                &mut SourceFd(&socket.as_raw_fd()),
+                mio::Token(i),
+                mio::Interest::READABLE,
+            )
+            .map_err(Error::EventLoopCreation)?;
     }
 
     loop {
-        poll.poll(&mut events, None)?;
+        poll.poll(&mut events, None).map_err(Error::EventPolling)?;
 
         for event in events.iter() {
             match event.token() {
                 TUN_TOKEN => {
                     let mut packet_buf = [0; BUFFER_SIZE];
-                    let len = tun_queue.read(&mut packet_buf)?;
+                    let len = match tun_queue.recv(&mut packet_buf).map_err(Error::ReadTun)? {
+                        Poll::Ready(len) => len,
+                        Poll::Pending => continue,
+                    };
                     let packet = &packet_buf[..len];
 
                     let tunnels_guard = state.send_tunnels.guard();
@@ -95,11 +104,13 @@ pub fn entrypoint(state: &State, mut tun_queue: tun::platform::Queue) -> io::Res
                             // Iterate over each local address.
                             for &local_addr in tunnel.local_addrs.iter() {
                                 // Get the local socket.
-                                let socket =
-                                    get_or_bind_send_socket(&mut send_sockets, local_addr)?;
+                                let socket = get_or_bind_send_socket(&mut send_sockets, local_addr)
+                                    .map_err(Error::BindSocket)?;
 
-                                // Send the message.
-                                socket.send_to(encoded, &remote_addr)?;
+                                // Send the encoded message.
+                                socket
+                                    .send_to(encoded, &remote_addr)
+                                    .map_err(Error::WriteSocket)?;
                             }
                         }
                     }
@@ -109,7 +120,7 @@ pub fn entrypoint(state: &State, mut tun_queue: tun::platform::Queue) -> io::Res
 
                     // Receive a datagram.
                     let mut buf = MaybeUninit::uninit_array::<{ BUFFER_SIZE }>();
-                    let (len, _) = socket.recv_from(&mut buf)?; // TODO: does this need to be non-blocking?
+                    let (len, _) = socket.recv_from(&mut buf).map_err(Error::ReadSocket)?; // TODO: does this need to be non-blocking?
                     let datagram = unsafe { MaybeUninit::slice_assume_init_mut(&mut buf[..len]) };
 
                     // Parse the message header.
@@ -153,7 +164,13 @@ pub fn entrypoint(state: &State, mut tun_queue: tun::platform::Queue) -> io::Res
                     match memory.observe(message.sequence_number) {
                         Some(PacketRecollection::Seen) | None => {}
                         Some(PacketRecollection::New) => {
-                            tun_queue.write(&message.packet)?;
+                            match tun_queue.send(&message.packet).map_err(Error::WriteTun)? {
+                                Poll::Ready(_) => {}
+                                Poll::Pending => {
+                                    log::warn!("writing packet to TUN device would block");
+                                    continue;
+                                }
+                            };
                         }
                     }
 
@@ -167,19 +184,20 @@ pub fn entrypoint(state: &State, mut tun_queue: tun::platform::Queue) -> io::Res
 const TUN_TOKEN: mio::Token = mio::Token(usize::MAX);
 
 /// Bind a UDP socket for receiving packets.
-fn bind_recv_socket(addr: SocketAddr) -> io::Result<Socket> {
+fn bind_recv_socket(addr: SocketAddr) -> Result<Socket, Error> {
     // Create a new UDP socket.
-    let socket = Socket::new(socket2::Domain::IPV4, socket2::Type::DGRAM, None)?;
+    let socket = Socket::new(socket2::Domain::IPV4, socket2::Type::DGRAM, None)
+        .map_err(Error::BindSocket)?;
 
     // Each worker will bind to the same addresses.
-    socket.set_reuse_address(true)?;
-    socket.set_reuse_port(true)?;
+    socket.set_reuse_address(true).map_err(Error::BindSocket)?;
+    socket.set_reuse_port(true).map_err(Error::BindSocket)?;
 
     // Bind the socket to the address.
-    socket.bind(&addr.into())?;
+    socket.bind(&addr.into()).map_err(Error::BindSocket)?;
 
     // Set the socket to non-blocking mode.
-    socket.set_nonblocking(true)?;
+    socket.set_nonblocking(true).map_err(Error::BindSocket)?;
 
     Ok(socket)
 }
@@ -209,4 +227,28 @@ fn get_or_bind_send_socket(
     }
 
     Ok(sockets.get(&addr).unwrap())
+}
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("error setting up the event loop")]
+    EventLoopCreation(#[source] io::Error),
+
+    #[error("error polling for events")]
+    EventPolling(#[source] io::Error),
+
+    #[error("error binding socket")]
+    BindSocket(#[source] io::Error),
+
+    #[error("error reading from TUN device")]
+    ReadTun(#[source] io::Error),
+
+    #[error("error writing to TUN device")]
+    WriteTun(#[source] io::Error),
+
+    #[error("error reading datagram from socket")]
+    ReadSocket(#[source] io::Error),
+
+    #[error("error writing datagram to socket")]
+    WriteSocket(#[source] io::Error),
 }
