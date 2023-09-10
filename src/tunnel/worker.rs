@@ -12,15 +12,13 @@ use mio::unix::SourceFd;
 use socket2::{SockAddr, Socket};
 use thiserror::Error;
 
-use crate::tun;
-
 use super::{message::Message, packet_memory::PacketRecollection, State};
 
 // TODO: make this configurable or use path MTU discovery
 const BUFFER_SIZE: usize = 64 * 1024;
 
 /// The entrypoint for each tunnel worker.
-pub fn entrypoint(state: &State, tun_queue: &tun::Device) -> Result<!, Error> {
+pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> Result<!, Error> {
     // TODO: Ensure the passed TUN queue is correctly configured, once we use a seperate tun lib.
 
     // Create a mio poller and event queue.
@@ -61,11 +59,13 @@ pub fn entrypoint(state: &State, tun_queue: &tun::Device) -> Result<!, Error> {
     loop {
         poll.poll(&mut events, None).map_err(Error::EventPolling)?;
 
+        log::trace!("event loop triggered by events: {:#?}", events);
+
         for event in events.iter() {
             match event.token() {
                 TUN_TOKEN => {
                     let mut packet_buf = [0; BUFFER_SIZE];
-                    let len = match tun_queue.recv(&mut packet_buf).map_err(Error::ReadTun)? {
+                    let len = match tun_queue.read(&mut packet_buf).map_err(Error::ReadTun)? {
                         Poll::Ready(len) => len,
                         Poll::Pending => continue,
                     };
@@ -88,6 +88,8 @@ pub fn entrypoint(state: &State, tun_queue: &tun::Device) -> Result<!, Error> {
                                 sequence_number,
                                 packet,
                             };
+
+                            log::trace!("sending message: {:?}", message);
 
                             // Encode the message.
                             let mut encoded_buf = [0; BUFFER_SIZE];
@@ -153,6 +155,8 @@ pub fn entrypoint(state: &State, tun_queue: &tun::Device) -> Result<!, Error> {
 
                     drop(cipher_guard);
 
+                    log::trace!("received message: {:?}", message);
+
                     // Write the packet to the TUN device if it is new.
                     let recv_memory_guard = state.recv_memory.guard();
 
@@ -164,7 +168,7 @@ pub fn entrypoint(state: &State, tun_queue: &tun::Device) -> Result<!, Error> {
                     match memory.observe(message.sequence_number) {
                         Some(PacketRecollection::Seen) | None => {}
                         Some(PacketRecollection::New) => {
-                            match tun_queue.send(&message.packet).map_err(Error::WriteTun)? {
+                            match tun_queue.write(&message.packet).map_err(Error::WriteTun)? {
                                 Poll::Ready(_) => {}
                                 Poll::Pending => {
                                     log::warn!("writing packet to TUN device would block");

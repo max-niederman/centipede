@@ -8,7 +8,6 @@ use std::num::NonZeroU32;
 use serde::{Deserialize, Serialize};
 
 pub mod config;
-pub mod tun;
 pub mod tunnel;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
