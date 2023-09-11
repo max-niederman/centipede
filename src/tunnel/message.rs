@@ -13,8 +13,6 @@ pub struct Message<'m> {
     pub packet: &'m [u8],
 }
 
-pub const MAX_DATAGRAM_SIZE: usize = 1500;
-
 impl<'m> Message<'m> {
     pub const HEADER_SIZE: usize = 4 + 8 + 16;
 
@@ -82,6 +80,8 @@ impl<'m> Message<'m> {
 
         let (nonce, rest) = buf.split_at_mut(4 + 8);
         let (tag_buf, packet) = rest.split_at_mut(16);
+
+        packet.copy_from_slice(self.packet);
 
         let (endpoint, sequence_number) = nonce.split_at_mut(4);
 

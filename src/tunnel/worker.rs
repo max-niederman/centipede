@@ -4,6 +4,7 @@ use std::{
     mem::MaybeUninit,
     net::SocketAddr,
     os::fd::AsRawFd,
+    rc::Rc,
     sync::atomic::Ordering,
     task::Poll,
 };
@@ -25,18 +26,23 @@ pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> 
     let mut poll = mio::Poll::new().map_err(Error::EventLoopCreation)?;
     let mut events = mio::Events::with_capacity(1024);
 
+    let mut send_sockets: HashMap<SocketAddr, Rc<Socket>> = HashMap::new();
+
     // TODO: dynamic swapping
     // Bind each of the receive sockets.
     let recv_sockets: Vec<_> = state
         .recv_addrs
         .iter()
-        .copied()
-        .map(bind_recv_socket)
+        .map(|addr| {
+            let socket = Rc::new(bind_recv_socket(*addr)?);
+
+            send_sockets.insert(*addr, socket.clone());
+
+            Ok::<_, Error>(socket)
+        })
         .try_collect()?;
 
-    let mut send_sockets: HashMap<SocketAddr, Socket> = HashMap::new();
-
-    // Register the TUN device with the poller.
+    // Register the TUN queue with the poller.
     poll.registry()
         .register(
             &mut SourceFd(&tun_queue.as_raw_fd()),
@@ -57,12 +63,13 @@ pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> 
     }
 
     loop {
+        // Poll for events.
         poll.poll(&mut events, None).map_err(Error::EventPolling)?;
 
-        log::trace!("event loop triggered by events: {:#?}", events);
-
+        // Iterate over each event.
         for event in events.iter() {
             match event.token() {
+                // The TUN queue has a packet to read.
                 TUN_TOKEN => {
                     let mut packet_buf = [0; BUFFER_SIZE];
                     let len = match tun_queue.read(&mut packet_buf).map_err(Error::ReadTun)? {
@@ -117,6 +124,7 @@ pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> 
                         }
                     }
                 }
+                // A receive socket has a datagram to receive.
                 mio::Token(recv_socket_index) => {
                     let socket = &recv_sockets[recv_socket_index];
 
@@ -209,7 +217,7 @@ fn bind_recv_socket(addr: SocketAddr) -> Result<Socket, Error> {
 /// Get a UDP socket for sending packets from the map,
 /// or bind a new one if it hasn't been created yet.
 fn get_or_bind_send_socket(
-    sockets: &mut HashMap<SocketAddr, Socket>,
+    sockets: &mut HashMap<SocketAddr, Rc<Socket>>,
     addr: SocketAddr,
 ) -> io::Result<&Socket> {
     if !sockets.contains_key(&addr) {
@@ -227,7 +235,7 @@ fn get_or_bind_send_socket(
         socket.set_nonblocking(true)?;
 
         // Add the socket to the map.
-        sockets.insert(addr, socket);
+        sockets.insert(addr, Rc::new(socket));
     }
 
     Ok(sockets.get(&addr).unwrap())

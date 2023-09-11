@@ -5,7 +5,6 @@ use std::{
 };
 
 use chacha20poly1305::ChaCha20Poly1305;
-use socket2::{SockAddr, Socket};
 
 use crate::{EndpointId, TunnelId};
 use packet_memory::PacketMemory;
