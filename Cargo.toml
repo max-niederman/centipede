@@ -17,3 +17,6 @@ serde_with = { version = "3.3.0", features = ["base64"] }
 socket2 = { version = "0.5.3", features = ["all"] }
 thiserror = "1.0.47"
 toml = "0.7.6"
+
+[profile.dev]
+opt-level = 1

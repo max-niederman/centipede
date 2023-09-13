@@ -3,21 +3,21 @@ if_name = "cp1"
 workers = 1
 recv_addresses = [
     "10.0.1.2:5000",
-    # "10.0.1.2:5001",
+    "10.0.1.2:5001",
 ]
 
 [[recv_tunnels]]
 endpoints = [
     { id = 1, key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE=" },
-    # { id = 2, key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAI=" },
+    { id = 2, key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAI=" },
 ]
 
 [[send_tunnels]]
 local_addresses = [
     "10.0.1.2:5000",
-    # "10.0.1.2:5001",
+    "10.0.1.2:5001",
 ]
 endpoints = [
     { id = 1, address = "10.0.1.1:5000", key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE=" },
-    # { id = 2, address = "10.0.1.1:5001", key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAI=" },
+    { id = 2, address = "10.0.1.1:5001", key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAI=" },
 ]

@@ -4,6 +4,7 @@ use std::{
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
+#[derive(Debug)]
 pub struct PacketMemory {
     /// Number of previously seen packets to remember.
     forward_window: usize,
@@ -13,9 +14,9 @@ pub struct PacketMemory {
     /// Bitset remembering which packets have been seen.
     seen_packets: CircularConcurrentBitset,
 
-    /// The sequence number of the last packet seen.
+    /// The greatest sequence number that's been seen.
     /// This is also the boundary between the forward and backward windows.
-    seen_last: AtomicU64,
+    seen_max: AtomicU64,
 }
 
 impl PacketMemory {
@@ -24,48 +25,69 @@ impl PacketMemory {
         Self {
             forward_window,
             backward_window,
-            seen_packets: CircularConcurrentBitset::new(forward_window + backward_window),
-            seen_last: AtomicU64::new(0),
+            seen_packets: CircularConcurrentBitset::new(forward_window + backward_window + 1),
+            seen_max: AtomicU64::new(0),
         }
     }
 
     /// Observes a packet with the given sequence number,
     /// returning whether it's been seen before, if possible.
-    pub fn observe(&self, seq: u64) -> Option<PacketRecollection> {
-        let old_last = self.seen_last.fetch_max(seq, Ordering::SeqCst);
+    pub fn observe(&self, seq: u64) -> PacketRecollection {
+        let old_max = self.seen_max.load(Ordering::SeqCst);
 
-        // The packet is in or ahead of the forward window.
-        if seq > old_last {
+        // The packet is ahead of the forward window.
+        if seq > (old_max + self.forward_window as u64) {
+            PacketRecollection::Confusing
+        }
+        // The packet is in the forward window.
+        else if seq > old_max {
+            // Update the maximum seen sequence number.
+            self.seen_max.fetch_max(seq, Ordering::SeqCst);
+
+            // Set the packet as seen.
+            self.seen_packets.set(seq as usize, true);
+
             // The former forward window is already zeroed,
             // so we zero from the end of the old forward window to the end of the new one.
             self.seen_packets.zero_range(
-                (old_last as usize + self.forward_window)..(seq as usize + self.forward_window),
+                (old_max as usize + self.forward_window + 1)
+                    ..(seq as usize + self.forward_window + 1),
             );
 
-            Some(PacketRecollection::New)
+            PacketRecollection::New
         }
         // The packet is in the backward window.
-        else if (self.backward_window as u64 > old_last)
-            || seq >= old_last - self.backward_window as u64
+        else if (self.backward_window as u64 > old_max)
+            || seq >= (old_max - self.backward_window as u64)
         {
             let already_seen = self.seen_packets.set(seq as usize, true);
 
             if already_seen {
-                Some(PacketRecollection::Seen)
+                PacketRecollection::Seen
             } else {
-                Some(PacketRecollection::New)
+                PacketRecollection::New
             }
         }
         // The packet is before the backward window.
         else {
-            None
+            PacketRecollection::Confusing
         }
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PacketRecollection {
+    /// The packet is new and not confusing.
+    /// This can be the case if the packet is in backward window,
+    /// and is always the case if the packet is in the forward window.
     New,
+    /// The packet has been seen before.
+    /// This can be the case if the packet is in the backward window,
+    /// and is never the case if the packet is in the forward window or elsewhere.
     Seen,
+    /// The packet is confusing, and ignored by the memory.
+    /// This happens iff the packet is before the backward window or ahead of the forward window.
+    Confusing,
 }
 
 impl Default for PacketMemory {
@@ -74,6 +96,7 @@ impl Default for PacketMemory {
     }
 }
 
+#[derive(Debug)]
 struct CircularConcurrentBitset {
     bits: Vec<AtomicBool>,
 }
@@ -156,4 +179,120 @@ mod tests {
             assert_eq!(bitset.get(i), i == 4);
         }
     }
+
+    macro_rules! assert_recollection {
+        ($memory:expr, $id:expr, $seq:literal : new) => {{
+            let recollection = $memory.observe($seq);
+            assert!(
+                recollection == PacketRecollection::New,
+                r#"
+recollection test {id} failed:
+    expected sequence number {seq} to have recollection New,
+    but it had recollection {recollection:?} instead
+                "#,
+                id = $id,
+                seq = $seq,
+            );
+        }};
+        ($memory:expr, $id:expr, $seq:literal : seen) => {{
+            let recollection = $memory.observe($seq);
+            assert!(
+                recollection == PacketRecollection::Seen,
+                r#"
+recollection test {id} failed:
+    expected sequence number {seq} to have recollection Seen,
+    but it had recollection {recollection:?} instead
+                "#,
+                id = $id,
+                seq = $seq,
+            );
+        }};
+        ($memory:expr, $id:expr, $seq:literal : confusing) => {{
+            let recollection = $memory.observe($seq);
+            assert!(
+                recollection == PacketRecollection::Confusing,
+                r#"
+recollection test {id} failed:
+    expected sequence number {seq} to be confusing,
+    but it had recollection {recollection:?}
+                "#,
+                id = $id,
+                seq = $seq,
+            );
+        }};
+    }
+
+    macro_rules! recollection_test {
+        ($name:ident, $memory:expr, { $( $seq:literal : $rec:ident ; )* }) => {
+            #[test]
+            #[allow(unused_assignments)]
+            fn $name() {
+                let memory = $memory;
+                let mut i: usize = 0;
+                $(
+                    println!("memory = {:#?}", memory);
+                    println!("recollection test {i}: seq = {seq}, rec = {exp}", i = i, seq = $seq, exp = stringify!($rec));
+
+                    assert_recollection!(memory, i, $seq : $rec);
+
+                    i += 1;
+                )*
+            }
+        };
+    }
+
+    recollection_test!(
+        monotonically_increasing_always_new,
+        PacketMemory::new(2, 2),
+        {
+            0: new;
+            1: new;
+            2: new;
+            3: new;
+            4: new;
+        }
+    );
+
+    recollection_test!(
+        duplicate_within_backward_window,
+        PacketMemory::new(2, 2),
+        {
+            0: new;
+            1: new;
+            2: new;
+            2: seen;
+
+            3: new;
+            4: new;
+            5: new;
+            6: new;
+            5: seen;
+        }
+    );
+
+    recollection_test!(
+        duplicate_before_backward_window,
+        PacketMemory::new(2, 2),
+        {
+            0: new;
+            1: new;
+            2: new;
+            3: new;
+            0: confusing;
+            1: seen;
+        }
+    );
+
+    recollection_test!(
+        ahead_of_forward_window,
+        PacketMemory::new(2, 2),
+        {
+            0: new;
+            1: new;
+            2: new;
+            10: confusing;
+            1: seen;
+            2: seen;
+        }
+    );
 }

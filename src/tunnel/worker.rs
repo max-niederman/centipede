@@ -178,8 +178,7 @@ pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> 
                         .expect("cipher and memory are in sync");
 
                     match memory.observe(message.sequence_number) {
-                        Some(PacketRecollection::Seen) | None => {}
-                        Some(PacketRecollection::New) => {
+                        PacketRecollection::New => {
                             match tun_queue.write(&message.packet).map_err(Error::WriteTun)? {
                                 Poll::Ready(_) => {}
                                 Poll::Pending => {
@@ -187,6 +186,11 @@ pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> 
                                     continue;
                                 }
                             };
+                        }
+                        PacketRecollection::Seen => {}
+                        PacketRecollection::Confusing => {
+                            log::warn!("received confusing packet");
+                            continue;
                         }
                     }
 
