@@ -1,12 +1,6 @@
 use std::{
-    collections::HashMap,
-    io::{self, Read, Write},
-    mem::MaybeUninit,
-    net::SocketAddr,
-    os::fd::AsRawFd,
-    rc::Rc,
-    sync::atomic::Ordering,
-    task::Poll,
+    collections::HashMap, io, mem::MaybeUninit, net::SocketAddr, os::fd::AsRawFd, rc::Rc,
+    sync::atomic::Ordering, task::Poll,
 };
 
 use mio::unix::SourceFd;
@@ -64,7 +58,11 @@ pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> 
 
     loop {
         // Poll for events.
-        poll.poll(&mut events, None).map_err(Error::EventPolling)?;
+        match poll.poll(&mut events, None) {
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(Error::EventPolling(e)),
+        }
 
         // Iterate over each event.
         for event in events.iter() {
