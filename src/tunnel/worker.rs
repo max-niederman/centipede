@@ -70,11 +70,11 @@ pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> 
         for event in events.iter() {
             match event.token() {
                 // The TUN queue has a packet to read.
-                TUN_TOKEN => {
+                TUN_TOKEN => loop {
                     let mut packet_buf = [0; BUFFER_SIZE];
                     let len = match tun_queue.read(&mut packet_buf).map_err(Error::ReadTun)? {
                         Poll::Ready(len) => len,
-                        Poll::Pending => continue,
+                        Poll::Pending => break,
                     };
                     let packet = &packet_buf[..len];
 
@@ -123,14 +123,18 @@ pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> 
                             }
                         }
                     }
-                }
+                },
                 // A receive socket has a datagram to receive.
-                mio::Token(recv_socket_index) => {
+                mio::Token(recv_socket_index) => loop {
                     let socket = &recv_sockets[recv_socket_index];
 
                     // Receive a datagram.
                     let mut buf = MaybeUninit::uninit_array::<{ BUFFER_SIZE }>();
-                    let (len, _) = socket.recv_from(&mut buf).map_err(Error::ReadSocket)?; // TODO: does this need to be non-blocking?
+                    let (len, _) = match socket.recv_from(&mut buf) {
+                        Ok(len) => len,
+                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                        Err(e) => return Err(Error::ReadSocket(e)),
+                    };
                     let datagram = unsafe { MaybeUninit::slice_assume_init_mut(&mut buf[..len]) };
 
                     // Parse the message header.
@@ -187,7 +191,7 @@ pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> 
                     }
 
                     drop(recv_memory_guard);
-                }
+                },
             }
         }
     }
