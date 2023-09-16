@@ -1,15 +1,16 @@
-#![feature(never_type)]
 #![feature(iterator_try_collect)]
 #![feature(maybe_uninit_slice)]
 #![feature(maybe_uninit_uninit_array)]
+#![feature(never_type)]
+#![feature(split_array)]
 
 use std::num::NonZeroU32;
 
 use serde::{Deserialize, Serialize};
 
 pub mod config;
-pub mod tunnel;
 pub mod control;
+pub mod tunnel;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(transparent)]

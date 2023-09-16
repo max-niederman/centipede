@@ -23,17 +23,17 @@ impl<'m> Message<'m> {
     // TODO: reduce the duplication here
 
     pub fn parse(buf: &'m [u8]) -> Result<Self, Error> {
-        let (endpoint, buf) = buf.split_at(4);
-        let (sequence_number, buf) = buf.split_at(8);
+        let (&endpoint, buf) = buf.split_array_ref::<4>();
+        let (&sequence_number, buf) = buf.split_array_ref::<8>();
         let (_tag, packet) = buf.split_at(16);
 
         let endpoint = EndpointId(
-            u32::from_be_bytes(endpoint.try_into().unwrap())
+            u32::from_be_bytes(endpoint)
                 .try_into()
                 .map_err(|_| Error::InvalidEndpoint)?,
         );
 
-        let sequence_number = u64::from_be_bytes(sequence_number.try_into().unwrap());
+        let sequence_number = u64::from_be_bytes(sequence_number);
 
         Ok(Self {
             endpoint,
@@ -50,10 +50,10 @@ impl<'m> Message<'m> {
             .decrypt_in_place_detached(Nonce::from_slice(nonce), &[], packet, Tag::from_slice(tag))
             .map_err(Error::Decryption)?;
 
-        let (endpoint, sequence_number) = nonce.split_at(4);
+        let (&endpoint, sequence_number) = nonce.split_array_ref::<4>();
 
         let endpoint = EndpointId(
-            u32::from_be_bytes(endpoint.try_into().unwrap())
+            u32::from_be_bytes(endpoint)
                 .try_into()
                 .map_err(|_| Error::InvalidEndpoint)?,
         );
