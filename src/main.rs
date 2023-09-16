@@ -31,11 +31,8 @@ fn main() {
         for tunnel in config.recv_tunnels {
             trans.create_receive_tunnel(
                 TunnelId(next_tunnel_id),
-                tunnel
-                    .endpoints
-                    .into_iter()
-                    .map(|e| (e.id, ChaCha20Poly1305::new_from_slice(&e.key).unwrap()))
-                    .collect(),
+                ChaCha20Poly1305::new_from_slice(&tunnel.key).unwrap(),
+                tunnel.endpoints.iter().map(|e| e.id).collect(),
             );
             next_tunnel_id = next_tunnel_id.checked_add(1).unwrap();
         }
@@ -43,18 +40,9 @@ fn main() {
         for tunnel in config.send_tunnels {
             trans.create_send_tunnel(
                 TunnelId(next_tunnel_id),
+                ChaCha20Poly1305::new_from_slice(&tunnel.key).unwrap(),
                 tunnel.local_addresses,
-                tunnel
-                    .endpoints
-                    .into_iter()
-                    .map(|e| {
-                        (
-                            e.id,
-                            e.address,
-                            ChaCha20Poly1305::new_from_slice(&e.key).unwrap(),
-                        )
-                    })
-                    .collect(),
+                tunnel.endpoints.iter().map(|e| (e.id, e.address)).collect(),
             );
             next_tunnel_id = next_tunnel_id.checked_add(1).unwrap();
         }

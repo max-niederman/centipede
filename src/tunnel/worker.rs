@@ -87,26 +87,21 @@ pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> 
                         let sequence_number =
                             tunnel.next_sequence_number.fetch_add(1, Ordering::Relaxed);
 
-                        for (&endpoint, cipher) in tunnel.ciphers.iter() {
+                        for (&endpoint, &remote_addr) in
+                            tunnel.remote_addrs.iter(&remote_addrs_guard)
+                        {
                             let message = Message {
                                 endpoint,
                                 sequence_number,
                                 packet,
                             };
 
-                            log::trace!("sending message: {:?}", message);
+                            log::trace!("sending message to endpoint {endpoint:?}: {:#?}", message);
 
                             // Encode the message.
                             let mut encoded_buf = [0; BUFFER_SIZE];
-                            let encoded: &_ = message.encode(cipher, &mut encoded_buf).unwrap();
-
-                            // Get the remote addresses for this endpoint.
-                            let remote_addr = SockAddr::from(
-                                *tunnel
-                                    .remote_addrs
-                                    .get(&endpoint, &remote_addrs_guard)
-                                    .expect("endpoint and remote addresses are in sync"),
-                            );
+                            let encoded: &_ =
+                                message.encode(&tunnel.cipher, &mut encoded_buf).unwrap();
 
                             // Iterate over each local address.
                             for &local_addr in tunnel.local_addrs.iter() {
@@ -116,7 +111,7 @@ pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> 
 
                                 // Send the encoded message.
                                 socket
-                                    .send_to(encoded, &remote_addr)
+                                    .send_to(encoded, &SockAddr::from(remote_addr))
                                     .map_err(Error::WriteSocket)?;
                             }
                         }
@@ -144,10 +139,10 @@ pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> 
                         }
                     };
 
-                    // Find the cipher for this endpoint.
-                    let cipher_guard = state.recv_ciphers.guard();
+                    // Find the tunnel for this endpoint.
+                    let tunnel_guard = state.recv_tunnels.guard();
 
-                    let cipher = match state.recv_ciphers.get(&message.endpoint, &cipher_guard) {
+                    let tunnel = match state.recv_tunnels.get(&message.endpoint, &tunnel_guard) {
                         Some(cipher) => cipher,
                         None => {
                             log::warn!("received message for unknown endpoint");
@@ -155,7 +150,7 @@ pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> 
                         }
                     };
 
-                    let message = match Message::decode(cipher, datagram) {
+                    let message = match Message::decode(&tunnel.cipher, datagram) {
                         Ok(message) => message,
                         Err(e) => {
                             log::warn!("failed to decode message: {}", e);
@@ -163,19 +158,10 @@ pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> 
                         }
                     };
 
-                    drop(cipher_guard);
-
                     log::trace!("received message: {:?}", message);
 
                     // Write the packet to the TUN device if it is new.
-                    let recv_memory_guard = state.recv_memory.guard();
-
-                    let memory = state
-                        .recv_memory
-                        .get(&message.endpoint, &recv_memory_guard)
-                        .expect("cipher and memory are in sync");
-
-                    match memory.observe(message.sequence_number) {
+                    match tunnel.memory.observe(message.sequence_number) {
                         PacketRecollection::New => {
                             match tun_queue.write(&message.packet).map_err(Error::WriteTun)? {
                                 Poll::Ready(_) => {}
@@ -192,7 +178,7 @@ pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> 
                         }
                     }
 
-                    drop(recv_memory_guard);
+                    drop(tunnel_guard);
                 },
             }
         }

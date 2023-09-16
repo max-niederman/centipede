@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod config;
 pub mod tunnel;
+pub mod control;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(transparent)]

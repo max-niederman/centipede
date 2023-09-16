@@ -20,3 +20,7 @@ toml = "0.7.6"
 
 [profile.dev]
 opt-level = 1
+
+[profile.release]
+debug = true
+lto = "thin"

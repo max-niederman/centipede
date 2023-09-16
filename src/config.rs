@@ -28,33 +28,37 @@ pub struct Config {
     pub send_tunnels: Vec<SendTunnel>,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecvTunnel {
+    /// Encryption key.
+    #[serde_as(as = "Base64")]
+    pub key: [u8; 32],
+
     /// Endpoints to receive on.
     pub endpoints: Vec<RecvEndpoint>,
 }
 
-#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecvEndpoint {
     /// Endpoint ID.
     pub id: EndpointId,
-
-    /// Encryption key.
-    #[serde_as(as = "Base64")]
-    pub key: [u8; 32],
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SendTunnel {
     /// Local addresses to bind to.
     pub local_addresses: Vec<SocketAddr>,
 
+    /// Encryption key.
+    #[serde_as(as = "Base64")]
+    pub key: [u8; 32],
+
     /// Remote endpoints to connect to.
     pub endpoints: Vec<SendEndpoint>,
 }
 
-#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SendEndpoint {
     /// Endpoint ID.
@@ -62,8 +66,4 @@ pub struct SendEndpoint {
 
     /// Address of the endpoint.
     pub address: SocketAddr,
-
-    /// Encryption key.
-    #[serde_as(as = "Base64")]
-    pub key: [u8; 32],
 }
