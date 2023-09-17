@@ -54,7 +54,7 @@ fn main() {
 
         for i in 0..config.workers {
             s.spawn(move || {
-                tunnel::worker::entrypoint(&tunnel_state, &tun.queue_nonblocking(i).unwrap())
+                tunnel::worker::entrypoint(tunnel_state, &tun.queue_nonblocking(i).unwrap())
                     .unwrap();
             });
         }

@@ -1,6 +1,12 @@
 use std::{
-    collections::HashMap, io, mem::MaybeUninit, net::SocketAddr, os::fd::AsRawFd, rc::Rc,
-    sync::atomic::Ordering, task::Poll,
+    collections::hash_map::{self, HashMap},
+    io,
+    mem::MaybeUninit,
+    net::SocketAddr,
+    os::fd::AsRawFd,
+    rc::Rc,
+    sync::atomic::Ordering,
+    task::Poll,
 };
 
 use mio::unix::SourceFd;
@@ -163,7 +169,7 @@ pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> 
                     // Write the packet to the TUN device if it is new.
                     match tunnel.memory.observe(message.sequence_number) {
                         PacketRecollection::New => {
-                            match tun_queue.write(&message.packet).map_err(Error::WriteTun)? {
+                            match tun_queue.write(message.packet).map_err(Error::WriteTun)? {
                                 Poll::Ready(_) => {}
                                 Poll::Pending => {
                                     log::warn!("writing packet to TUN device would block");
@@ -212,7 +218,7 @@ fn get_or_bind_send_socket(
     sockets: &mut HashMap<SocketAddr, Rc<Socket>>,
     addr: SocketAddr,
 ) -> io::Result<&Socket> {
-    if !sockets.contains_key(&addr) {
+    if let hash_map::Entry::Vacant(entry) = sockets.entry(addr) {
         // Create a new UDP socket.
         let socket = Socket::new(socket2::Domain::IPV4, socket2::Type::DGRAM, None)?;
 
@@ -227,7 +233,7 @@ fn get_or_bind_send_socket(
         socket.set_nonblocking(true)?;
 
         // Add the socket to the map.
-        sockets.insert(addr, Rc::new(socket));
+        entry.insert(Rc::new(socket));
     }
 
     Ok(sockets.get(&addr).unwrap())

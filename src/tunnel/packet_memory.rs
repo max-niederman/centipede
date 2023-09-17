@@ -113,6 +113,7 @@ impl CircularConcurrentBitset {
     }
 
     /// Atomically gets the bit at the given index.
+    #[cfg(test)]
     pub fn get(&self, index: usize) -> bool {
         self.bits[index % self.size()].load(Ordering::SeqCst)
     }
