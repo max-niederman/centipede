@@ -1,10 +1,29 @@
-use std::net::SocketAddr;
-
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{EndpointId, TunnelId};
+use crate::tunnel;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum Message {
+    /// Request that the recipient create or update a connection.
+    UpsertConnection {
+        /// The ephemeral public key of the sender.
+        ephemeral_key: x25519_dalek::PublicKey,
+
+        /// Tunnel endpoints the sender is listening on.
+        endpoints: Vec<tunnel::Endpoint>,
+    },
+    /// Acknowledge a connection upsertion request.
+    UpsertConnectionAck {
+        /// The ephemeral public key of the sender.
+        ephemeral_key: x25519_dalek::PublicKey,
+
+        /// Tunnel endpoints the sender is listening on.
+        endpoints: Vec<tunnel::Endpoint>,
+    },
+}
 
 pub struct AuthenticatedMessage {
     /// The public key of the sender.
@@ -14,49 +33,9 @@ pub struct AuthenticatedMessage {
     pub message: Message,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum Message {
-    /// Request that the recipient initiate a tunnel.
-    CreateTunnel {
-        /// The ephemeral public key of the sender.
-        ephemeral_key: x25519_dalek::PublicKey,
-
-        /// Tunnel endpoints the sender is listening on.
-        endpoints: Vec<Endpoint>,
-    },
-    /// Acknowledge a tunnel creation request.
-    CreateTunnelAcknowledge {
-        /// The sender's ID for the tunnel.
-        id: TunnelId,
-
-        /// The ephemeral public key of the sender.
-        ephemeral_key: x25519_dalek::PublicKey,
-    },
-    /// Request that the recipient begin sending messages on a tunnel.
-    ConnectTunnel {
-        /// The ID of the tunnel.
-        id: TunnelId,
-    },
-    /// Request that the recipient destroy a tunnel.
-    DestroyTunnel {
-        /// The ID of the tunnel.
-        id: TunnelId,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Endpoint {
-    /// The ID of the endpoint.
-    pub id: EndpointId,
-
-    /// The address of the endpoint.
-    pub address: SocketAddr,
-}
-
 impl AuthenticatedMessage {
-    /// Parse and verify a binary message.
-    pub fn parse(bytes: &[u8]) -> Result<Self, Error> {
+    /// Parse and authenticate a binary message.
+    pub fn parse_and_authenticate(bytes: &[u8]) -> Result<Self, Error> {
         let (public_key, bytes) = bytes.split_array_ref::<{ ed25519_dalek::PUBLIC_KEY_LENGTH }>();
         let (signature, message) = bytes.split_array_ref::<{ ed25519_dalek::SIGNATURE_LENGTH }>();
 
@@ -76,7 +55,7 @@ impl AuthenticatedMessage {
         })
     }
 
-    /// Serialize and sign a message.
+    /// Serialize and authenticate a message.
     pub fn serialize_and_authenticate(
         signing_key: &SigningKey,
         message: &Message,
@@ -118,24 +97,24 @@ pub enum Error {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{Ipv4Addr, SocketAddrV4};
+    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
     use super::*;
 
     #[test]
     fn parse_inverts_serialize() {
         let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
-        let message = Message::CreateTunnel {
+        let message = Message::UpsertConnection {
             ephemeral_key: x25519_dalek::PublicKey::from([0; 32]),
-            endpoints: vec![Endpoint {
-                id: EndpointId(1.try_into().unwrap()),
+            endpoints: vec![tunnel::Endpoint {
+                id: tunnel::EndpointId(1.try_into().unwrap()),
                 address: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1234)),
             }],
         };
 
         let bytes =
             AuthenticatedMessage::serialize_and_authenticate(&signing_key, &message).unwrap();
-        let authenticated_message = AuthenticatedMessage::parse(&bytes).unwrap();
+        let authenticated_message = AuthenticatedMessage::parse_and_authenticate(&bytes).unwrap();
 
         assert_eq!(
             authenticated_message.public_key,
@@ -147,10 +126,10 @@ mod tests {
     #[test]
     fn parse_catches_invalid_signature() {
         let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
-        let message = Message::CreateTunnel {
+        let message = Message::UpsertConnection {
             ephemeral_key: x25519_dalek::PublicKey::from([0; 32]),
-            endpoints: vec![Endpoint {
-                id: EndpointId(1.try_into().unwrap()),
+            endpoints: vec![tunnel::Endpoint {
+                id: tunnel::EndpointId(1.try_into().unwrap()),
                 address: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1234)),
             }],
         };
@@ -160,7 +139,7 @@ mod tests {
         bytes[32] ^= 1;
 
         assert!(matches!(
-            AuthenticatedMessage::parse(&bytes),
+            AuthenticatedMessage::parse_and_authenticate(&bytes),
             Err(Error::InvalidSignature(_))
         ));
     }

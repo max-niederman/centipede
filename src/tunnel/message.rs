@@ -1,7 +1,7 @@
 use chacha20poly1305::{AeadInPlace, ChaCha20Poly1305, Nonce, Tag};
 use thiserror::Error;
 
-use crate::EndpointId;
+use super::EndpointId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Message<'m> {

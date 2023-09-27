@@ -4,7 +4,7 @@ use cidr::IpInet;
 use serde::{Deserialize, Serialize};
 use serde_with::{base64::Base64, serde_as};
 
-use crate::EndpointId;
+use crate::tunnel::{Endpoint, EndpointId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -23,7 +23,7 @@ pub struct Config {
 
     /// Receiving tunnels.
     pub recv_tunnels: Vec<RecvTunnel>,
-    
+
     /// Sending tunnels.
     pub send_tunnels: Vec<SendTunnel>,
 }
@@ -66,4 +66,13 @@ pub struct SendEndpoint {
 
     /// Address of the endpoint.
     pub address: SocketAddr,
+}
+
+impl Into<Endpoint> for SendEndpoint {
+    fn into(self) -> Endpoint {
+        Endpoint {
+            id: self.id,
+            address: self.address,
+        }
+    }
 }

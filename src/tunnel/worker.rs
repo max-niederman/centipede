@@ -13,13 +13,16 @@ use mio::unix::SourceFd;
 use socket2::{SockAddr, Socket};
 use thiserror::Error;
 
-use super::{message::Message, packet_memory::PacketRecollection, State};
+use super::{message::Message, packet_memory::PacketRecollection, SharedState};
 
 // TODO: make this configurable or use path MTU discovery
 const BUFFER_SIZE: usize = 64 * 1024;
 
-/// The entrypoint for each tunnel worker.
-pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> Result<!, Error> {
+/// The entrypoint of each tunnel worker.
+pub fn entrypoint(
+    shared_state: &SharedState,
+    tun_queue: &hypertube::queue::Queue<false>,
+) -> Result<!, Error> {
     // TODO: Ensure the passed TUN queue is correctly configured, once we use a seperate tun lib.
 
     // Create a mio poller and event queue.
@@ -30,7 +33,7 @@ pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> 
 
     // TODO: dynamic swapping
     // Bind each of the receive sockets.
-    let recv_sockets: Vec<_> = state
+    let recv_sockets: Vec<_> = shared_state
         .recv_addrs
         .iter()
         .map(|addr| {
@@ -82,11 +85,11 @@ pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> 
                     };
                     let packet = &packet_buf[..len];
 
-                    let tunnels_guard = state.send_tunnels.guard();
+                    let tunnels_guard = shared_state.send_tunnels.guard();
 
                     // TODO: routing
                     // Iterate over each send tunnel.
-                    for tunnel in state.send_tunnels.values(&tunnels_guard) {
+                    for tunnel in shared_state.send_tunnels.values(&tunnels_guard) {
                         let remote_addrs_guard = tunnel.remote_addrs.guard();
 
                         // Get the unique sequence number for this packet.
@@ -146,9 +149,12 @@ pub fn entrypoint(state: &State, tun_queue: &hypertube::queue::Queue<false>) -> 
                     };
 
                     // Find the tunnel for this endpoint.
-                    let tunnel_guard = state.recv_tunnels.guard();
+                    let tunnel_guard = shared_state.recv_tunnels.guard();
 
-                    let tunnel = match state.recv_tunnels.get(&message.endpoint, &tunnel_guard) {
+                    let tunnel = match shared_state
+                        .recv_tunnels
+                        .get(&message.endpoint, &tunnel_guard)
+                    {
                         Some(cipher) => cipher,
                         None => {
                             log::warn!("received message for unknown endpoint");

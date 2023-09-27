@@ -1,6 +1,6 @@
 use std::{num::NonZeroU32, thread};
 
-use centipede::{config::Config, tunnel, TunnelId};
+use centipede::{config::Config, tunnel};
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
 
 fn main() {
@@ -21,30 +21,24 @@ fn main() {
         .build()
         .unwrap();
 
-    let tunnel_state = tunnel::State::new(config.recv_addresses.clone());
+    let tunnel_state = tunnel::SharedState::new(config.recv_addresses.clone());
 
     {
-        let mut trans = tunnel_state.transitioner();
-
-        let mut next_tunnel_id = NonZeroU32::MIN;
+        let mut trans = tunnel_state.transitioner().unwrap();
 
         for tunnel in config.recv_tunnels {
             trans.create_receive_tunnel(
-                TunnelId(next_tunnel_id),
                 ChaCha20Poly1305::new_from_slice(&tunnel.key).unwrap(),
                 tunnel.endpoints.iter().map(|e| e.id).collect(),
             );
-            next_tunnel_id = next_tunnel_id.checked_add(1).unwrap();
         }
 
         for tunnel in config.send_tunnels {
             trans.create_send_tunnel(
-                TunnelId(next_tunnel_id),
                 ChaCha20Poly1305::new_from_slice(&tunnel.key).unwrap(),
                 tunnel.local_addresses,
-                tunnel.endpoints.iter().map(|e| (e.id, e.address)).collect(),
+                tunnel.endpoints.into_iter().map(Into::into).collect(),
             );
-            next_tunnel_id = next_tunnel_id.checked_add(1).unwrap();
         }
     }
 
