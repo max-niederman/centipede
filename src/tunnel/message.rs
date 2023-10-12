@@ -85,7 +85,7 @@ impl<'m> Message<'m> {
 
         let (endpoint, sequence_number) = nonce.split_at_mut(4);
 
-        endpoint.copy_from_slice(&self.endpoint.0.get().to_be_bytes());
+        endpoint.copy_from_slice(&self.endpoint.0.to_be_bytes());
         sequence_number.copy_from_slice(&self.sequence_number.to_be_bytes());
 
         let tag = cipher
@@ -125,7 +125,7 @@ mod tests {
 
         let mut buf = [0; 1500];
         let message = Message {
-            endpoint: EndpointId(0x12345678.try_into().unwrap()),
+            endpoint: EndpointId(0x12345678),
             sequence_number: 0xabcdef,
             packet: &[0; 1500 - Message::HEADER_SIZE],
         };
@@ -142,7 +142,7 @@ mod tests {
 
         let mut buf = [0; 1500];
         let message = Message {
-            endpoint: EndpointId(0x12345678.try_into().unwrap()),
+            endpoint: EndpointId(0x12345678),
             sequence_number: 0xabcdef,
             packet: &[0; 1500 - Message::HEADER_SIZE],
         };

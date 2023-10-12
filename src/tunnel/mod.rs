@@ -1,11 +1,8 @@
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    num::NonZeroU32,
-    sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
-        Arc,
-    },
+    rc::Rc,
+    sync::{atomic::AtomicU64, Arc},
 };
 
 use chacha20poly1305::ChaCha20Poly1305;
@@ -13,13 +10,16 @@ use serde::{Deserialize, Serialize};
 
 use packet_memory::PacketMemory;
 
+use self::number_allocator::NumberAllocator;
+
 pub mod message;
+mod number_allocator;
 mod packet_memory;
 pub mod worker;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(transparent)]
-pub struct EndpointId(pub NonZeroU32);
+pub struct EndpointId(pub u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Endpoint {
@@ -40,15 +40,6 @@ pub struct SharedState {
 
     /// Set of sending tunnels.
     send_tunnels: flurry::HashMap<SendTunnelId, SendTunnel>,
-
-    /// The next receive tunnel ID.
-    next_recv_tunnel_id: AtomicUsize,
-
-    /// The next send tunnel ID.
-    next_send_tunnel_id: AtomicUsize,
-
-    /// Lock to prevent multiple transitioners from existing simultaneously.
-    transitioner_exists: AtomicBool,
 }
 
 struct RecvTunnel {
@@ -74,30 +65,23 @@ struct SendTunnel {
 }
 
 impl SharedState {
-    /// Create a new state.
-    pub fn new(recv_addrs: Vec<SocketAddr>) -> Self {
-        Self {
+    /// Create a new state, along with its unique transitioner.
+    pub fn new(recv_addrs: Vec<SocketAddr>) -> (Arc<Self>, StateTransitioner) {
+        let this = Arc::new(Self {
             recv_addrs,
             recv_tunnels: flurry::HashMap::new(),
             send_tunnels: flurry::HashMap::new(),
-            next_recv_tunnel_id: AtomicUsize::new(0),
-            next_send_tunnel_id: AtomicUsize::new(0),
-            transitioner_exists: AtomicBool::new(false),
-        }
-    }
+        });
 
-    /// Create a new state transitioner.
-    ///
-    /// It is usually a logic error for multiple transitioners to exist simultaneously.
-    pub fn transitioner(&self) -> Result<StateTransitioner<'_>, ()> {
-        self.transitioner_exists
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .map_err(|_| ())?;
-
-        Ok(StateTransitioner {
-            state: self,
+        let transitioner = StateTransitioner {
+            state: this.clone(),
+            recv_tunnel_id_alloc: NumberAllocator::new(),
+            send_tunnel_id_alloc: NumberAllocator::new(),
+            endpoint_id_alloc: NumberAllocator::new(),
             recv_tunnel_endpoints: HashMap::new(),
-        })
+        };
+
+        (this, transitioner)
     }
 }
 
@@ -110,21 +94,23 @@ pub struct RecvTunnelId(usize);
 pub struct SendTunnelId(usize);
 
 /// A handle to the state of the tunnel used to mutate it.
-pub struct StateTransitioner<'s> {
-    state: &'s SharedState,
+pub struct StateTransitioner {
+    state: Arc<SharedState>,
 
-    recv_tunnel_endpoints: HashMap<RecvTunnelId, Vec<EndpointId>>,
+    /// The receive tunnel ID allocator.
+    recv_tunnel_id_alloc: NumberAllocator<usize>,
+
+    /// The send tunnel ID allocator.
+    send_tunnel_id_alloc: NumberAllocator<usize>,
+
+    /// The endpoint ID allocator.
+    endpoint_id_alloc: NumberAllocator<u32>,
+
+    /// The endpoints of each receive tunnel.
+    recv_tunnel_endpoints: HashMap<RecvTunnelId, Rc<[EndpointId]>>,
 }
 
-impl<'a> Drop for StateTransitioner<'a> {
-    fn drop(&mut self) {
-        self.state
-            .transitioner_exists
-            .store(false, Ordering::Release);
-    }
-}
-
-impl<'s> StateTransitioner<'s> {
+impl StateTransitioner {
     /// Create a receive tunnel.
     ///
     /// # Panics
@@ -132,13 +118,9 @@ impl<'s> StateTransitioner<'s> {
     pub fn create_receive_tunnel(
         &mut self,
         cipher: ChaCha20Poly1305,
-        endpoints: Vec<EndpointId>,
-    ) -> RecvTunnelId {
-        let id = RecvTunnelId(
-            self.state
-                .next_recv_tunnel_id
-                .fetch_add(1, Ordering::Relaxed),
-        );
+        endpoint_count: usize,
+    ) -> (RecvTunnelId, Rc<[EndpointId]>) {
+        let id = RecvTunnelId(self.recv_tunnel_id_alloc.allocate());
 
         assert!(
             self.recv_tunnel_endpoints.get(&id).is_none(),
@@ -150,21 +132,29 @@ impl<'s> StateTransitioner<'s> {
             cipher,
             memory: PacketMemory::default(),
         });
+
+        let mut endpoints = Vec::with_capacity(endpoint_count);
+
         {
             let recv_tunnels = self.state.recv_tunnels.pin();
-            for endpoint in endpoints.iter().copied() {
-                recv_tunnels.insert(endpoint, tunnel.clone());
+
+            for _ in 0..endpoint_count {
+                let endpoint_id = EndpointId(self.endpoint_id_alloc.allocate());
+                endpoints.push(endpoint_id);
+                recv_tunnels.insert(endpoint_id, tunnel.clone());
             }
         }
 
-        // Record the endpoints for this tunnel to allow for later deletion.
-        self.recv_tunnel_endpoints.insert(id, endpoints);
+        let endpoints: Rc<[EndpointId]> = endpoints.into();
 
-        id
+        // Record the endpoints for this tunnel to allow for later deletion.
+        self.recv_tunnel_endpoints.insert(id, endpoints.clone());
+
+        (id, endpoints)
     }
 
     /// Delete a receive tunnel.
-    pub fn delete_receive_tunnel(&mut self, id: RecvTunnelId) -> Vec<EndpointId> {
+    pub fn delete_receive_tunnel(&mut self, id: RecvTunnelId) {
         // Remove the endpoints from the transitioner's state.
         let endpoints = self
             .recv_tunnel_endpoints
@@ -178,8 +168,6 @@ impl<'s> StateTransitioner<'s> {
                 recv_tunnels.remove(endpoint);
             }
         }
-
-        endpoints
     }
 
     /// Create a send tunnel.
@@ -192,11 +180,7 @@ impl<'s> StateTransitioner<'s> {
         local_addrs: Vec<SocketAddr>,
         endpoints: Vec<Endpoint>,
     ) -> SendTunnelId {
-        let id = SendTunnelId(
-            self.state
-                .next_send_tunnel_id
-                .fetch_add(1, Ordering::Relaxed),
-        );
+        let id = SendTunnelId(self.send_tunnel_id_alloc.allocate());
 
         let remote_addrs = endpoints
             .into_iter()
