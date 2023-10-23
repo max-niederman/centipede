@@ -90,22 +90,18 @@ pub fn entrypoint(
                     // TODO: routing
                     // Iterate over each send tunnel.
                     for tunnel in shared_state.send_tunnels.values(&tunnels_guard) {
-                        let remote_addrs_guard = tunnel.remote_addrs.guard();
-
                         // Get the unique sequence number for this packet.
                         let sequence_number =
                             tunnel.next_sequence_number.fetch_add(1, Ordering::Relaxed);
 
-                        for (&endpoint, &remote_addr) in
-                            tunnel.remote_addrs.iter(&remote_addrs_guard)
-                        {
+                        for remote_addr in tunnel.remote_addrs.iter() {
                             let message = Message {
-                                endpoint,
+                                sender: shared_state.local_id,
                                 sequence_number,
                                 packet,
                             };
 
-                            log::trace!("sending message to endpoint {endpoint:?}: {:#?}", message);
+                            log::trace!("sending message to {}: {:#?}", remote_addr, message);
 
                             // Encode the message.
                             let mut encoded_buf = [0; BUFFER_SIZE];
@@ -120,7 +116,7 @@ pub fn entrypoint(
 
                                 // Send the encoded message.
                                 socket
-                                    .send_to(encoded, &SockAddr::from(remote_addr))
+                                    .send_to(encoded, &SockAddr::from(*remote_addr))
                                     .map_err(Error::WriteSocket)?;
                             }
                         }
@@ -153,7 +149,7 @@ pub fn entrypoint(
 
                     let tunnel = match shared_state
                         .recv_tunnels
-                        .get(&message.endpoint, &tunnel_guard)
+                        .get(&message.sender, &tunnel_guard)
                     {
                         Some(cipher) => cipher,
                         None => {

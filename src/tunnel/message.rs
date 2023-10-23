@@ -1,70 +1,49 @@
 use chacha20poly1305::{AeadInPlace, ChaCha20Poly1305, Nonce, Tag};
 use thiserror::Error;
 
-use super::EndpointId;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Message<'m> {
-    /// The endpoint to which this message is addressed.
-    pub endpoint: EndpointId,
     /// The sequence number of this message.
     pub sequence_number: u64,
+
+    /// The identifier of the sender.
+    /// This is the upper 64 bits of the sender's public key.
+    pub sender: [u8; 8],
+
     /// The packet data.
     pub packet: &'m [u8],
 }
 
 impl<'m> Message<'m> {
-    pub const HEADER_SIZE: usize = 4 + 8 + 16;
+    pub const HEADER_SIZE: usize = 8 + 8 + 16;
 
     pub const fn length(&self) -> usize {
         Self::HEADER_SIZE + self.packet.len()
     }
 
-    // TODO: reduce the duplication here
-
     pub fn parse(buf: &'m [u8]) -> Result<Self, Error> {
-        let (&endpoint, buf) = buf.split_array_ref::<4>();
-        let (&sequence_number, buf) = buf.split_array_ref::<8>();
-        let (_tag, packet) = buf.split_at(16);
-
-        let endpoint = EndpointId(
-            u32::from_be_bytes(endpoint)
-                .try_into()
-                .map_err(|_| Error::InvalidEndpoint)?,
-        );
-
-        let sequence_number = u64::from_be_bytes(sequence_number);
+        let sequence_number = u64::from_be_bytes(buf[..8].try_into().unwrap());
+        let sender = buf[8..16].try_into().unwrap();
+        let packet = &buf[32..];
 
         Ok(Self {
-            endpoint,
             sequence_number,
+            sender,
             packet,
         })
     }
 
     pub fn decode(cipher: &ChaCha20Poly1305, buf: &'m mut [u8]) -> Result<Self, Error> {
-        let (nonce, buf) = buf.split_at_mut(4 + 8);
-        let (tag, packet) = buf.split_at_mut(16);
+        let (header, packet) = buf.split_at_mut(Self::HEADER_SIZE);
+
+        let nonce = &header[..12];
+        let tag = &header[16..];
 
         cipher
             .decrypt_in_place_detached(Nonce::from_slice(nonce), &[], packet, Tag::from_slice(tag))
             .map_err(Error::Decryption)?;
 
-        let (&endpoint, sequence_number) = nonce.split_array_ref::<4>();
-
-        let endpoint = EndpointId(
-            u32::from_be_bytes(endpoint)
-                .try_into()
-                .map_err(|_| Error::InvalidEndpoint)?,
-        );
-
-        let sequence_number = u64::from_be_bytes(sequence_number.try_into().unwrap());
-
-        Ok(Self {
-            endpoint,
-            sequence_number,
-            packet,
-        })
+        Self::parse(buf)
     }
 
     pub fn encode(
@@ -78,21 +57,16 @@ impl<'m> Message<'m> {
 
         buf = &mut buf[..self.length()];
 
-        let (nonce, rest) = buf.split_at_mut(4 + 8);
-        let (tag_buf, packet) = rest.split_at_mut(16);
+        let (header, packet) = buf.split_at_mut(Self::HEADER_SIZE);
 
-        packet.copy_from_slice(self.packet);
-
-        let (endpoint, sequence_number) = nonce.split_at_mut(4);
-
-        endpoint.copy_from_slice(&self.endpoint.0.to_be_bytes());
-        sequence_number.copy_from_slice(&self.sequence_number.to_be_bytes());
+        header[..8].copy_from_slice(&self.sequence_number.to_be_bytes());
+        header[8..16].copy_from_slice(&self.sender);
 
         let tag = cipher
-            .encrypt_in_place_detached(Nonce::from_slice(nonce), &[], packet)
+            .encrypt_in_place_detached(Nonce::from_slice(&header[..12]), &[], packet)
             .map_err(Error::Encryption)?;
 
-        tag_buf.copy_from_slice(&tag);
+        header[16..].copy_from_slice(&tag);
 
         Ok(buf)
     }
@@ -125,8 +99,8 @@ mod tests {
 
         let mut buf = [0; 1500];
         let message = Message {
-            endpoint: EndpointId(0x12345678),
             sequence_number: 0xabcdef,
+            sender: [1; 8],
             packet: &[0; 1500 - Message::HEADER_SIZE],
         };
 
@@ -142,15 +116,15 @@ mod tests {
 
         let mut buf = [0; 1500];
         let message = Message {
-            endpoint: EndpointId(0x12345678),
             sequence_number: 0xabcdef,
+            sender: [1; 8],
             packet: &[0; 1500 - Message::HEADER_SIZE],
         };
 
         let datagram = message.encode(&cipher, &mut buf).unwrap();
 
         let decoded = Message::parse(datagram).unwrap();
-        assert_eq!(decoded.endpoint, message.endpoint);
+        assert_eq!(decoded.sender, message.sender);
         assert_eq!(decoded.sequence_number, message.sequence_number);
         assert_ne!(decoded.packet, message.packet);
     }
