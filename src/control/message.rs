@@ -7,21 +7,31 @@ use crate::tunnel;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Message {
-    /// Request that the recipient create or update a connection.
-    UpsertConnection {
-        /// The ephemeral public key of the sender.
-        ephemeral_key: x25519_dalek::PublicKey,
+    /// Inform the recipient of a new generation on the sender.
+    NewGeneration {
+        /// The ID of the generation.
+        /// This monotonically increases for each request to
+        /// detect out-of-order and multiple delivery.
+        id: u64,
+
+        /// The ephemeral Diffie-Hellman public key of the sender.
+        dh_public_key: x25519_dalek::PublicKey,
 
         /// Tunnel endpoints the sender is listening on.
         endpoints: Vec<tunnel::Endpoint>,
     },
-    /// Acknowledge a connection upsertion request.
-    UpsertConnectionAck {
-        /// The ephemeral public key of the sender.
-        ephemeral_key: x25519_dalek::PublicKey,
+    /// Acknowledge the receipt of a new generation.
+    NewGenerationAck {
+        /// The ID of the generation.
+        id: u64,
 
-        /// Tunnel endpoints the sender is listening on.
-        endpoints: Vec<tunnel::Endpoint>,
+        /// The ephemeral Diffie-Hellman public key of the sender.
+        dh_public_key: x25519_dalek::PublicKey,
+    },
+    /// Activate a new generation.
+    ActivateGeneration {
+        /// The ID of the generation.
+        id: u64,
     },
 }
 
@@ -104,8 +114,9 @@ mod tests {
     #[test]
     fn parse_inverts_serialize() {
         let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
-        let message = Message::UpsertConnection {
-            ephemeral_key: x25519_dalek::PublicKey::from([0; 32]),
+        let message = Message::CreateGeneration {
+            request_id: 0,
+            dh_public_key: x25519_dalek::PublicKey::from([0; 32]),
             endpoints: vec![tunnel::Endpoint {
                 id: tunnel::EndpointId(1.try_into().unwrap()),
                 address: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1234)),
@@ -126,8 +137,9 @@ mod tests {
     #[test]
     fn parse_catches_invalid_signature() {
         let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
-        let message = Message::UpsertConnection {
-            ephemeral_key: x25519_dalek::PublicKey::from([0; 32]),
+        let message = Message::CreateGeneration {
+            request_id: 0,
+            dh_public_key: x25519_dalek::PublicKey::from([0; 32]),
             endpoints: vec![tunnel::Endpoint {
                 id: tunnel::EndpointId(1.try_into().unwrap()),
                 address: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1234)),

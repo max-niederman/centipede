@@ -45,6 +45,7 @@ pub struct SharedState {
 struct RecvTunnel {
     /// Cipher with which to decrypt messages.
     cipher: ChaCha20Poly1305,
+
     /// Memory of received packets.
     memory: PacketMemory,
 }
