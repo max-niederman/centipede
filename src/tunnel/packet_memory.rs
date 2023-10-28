@@ -6,9 +6,9 @@ use std::{
 
 #[derive(Debug)]
 pub struct PacketMemory {
-    /// Number of previously seen packets to remember.
-    forward_window: usize,
     /// Maximum size of jump in sequence numbers for which to maintain space.
+    forward_window: usize,
+    /// Number of previously seen packets to remember.
     backward_window: usize,
 
     /// Bitset remembering which packets have been seen.
