@@ -2,9 +2,6 @@ use std::{ffi::CString, net::SocketAddr};
 
 use cidr::IpInet;
 use serde::{Deserialize, Serialize};
-use serde_with::{base64::Base64, serde_as};
-
-use crate::tunnel::{Endpoint, EndpointId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -20,59 +17,4 @@ pub struct Config {
 
     /// Local addresses on which to receive messages.
     pub recv_addresses: Vec<SocketAddr>,
-
-    /// Receiving tunnels.
-    pub recv_tunnels: Vec<RecvTunnel>,
-
-    /// Sending tunnels.
-    pub send_tunnels: Vec<SendTunnel>,
-}
-
-#[serde_as]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RecvTunnel {
-    /// Encryption key.
-    #[serde_as(as = "Base64")]
-    pub key: [u8; 32],
-
-    /// Endpoints to receive on.
-    pub endpoints: Vec<RecvEndpoint>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RecvEndpoint {
-    /// Endpoint ID.
-    pub id: EndpointId,
-}
-
-#[serde_as]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SendTunnel {
-    /// Local addresses to bind to.
-    pub local_addresses: Vec<SocketAddr>,
-
-    /// Encryption key.
-    #[serde_as(as = "Base64")]
-    pub key: [u8; 32],
-
-    /// Remote endpoints to connect to.
-    pub endpoints: Vec<SendEndpoint>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SendEndpoint {
-    /// Endpoint ID.
-    pub id: EndpointId,
-
-    /// Address of the endpoint.
-    pub address: SocketAddr,
-}
-
-impl Into<Endpoint> for SendEndpoint {
-    fn into(self) -> Endpoint {
-        Endpoint {
-            id: self.id,
-            address: self.address,
-        }
-    }
 }

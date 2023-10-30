@@ -1,12 +1,13 @@
-use std::{collections::HashMap, net::SocketAddr};
+use std::net::SocketAddr;
 
 use cidr::IpInet;
 use ed25519_dalek::VerifyingKey;
 
 pub mod message;
 
-mod tunnels;
 mod connection;
+mod transport;
+mod tunnels;
 
 pub enum Command {
     Connection {
@@ -15,7 +16,7 @@ pub enum Command {
 
         /// The desired state of the connection, if any.
         desired_state: Option<ConnectionSpec>,
-    }
+    },
 }
 
 pub struct ConnectionSpec {
@@ -31,4 +32,3 @@ pub struct ConnectionSpec {
     /// The VPN address of the peer's control socket.
     remote_vpn_inet: SocketAddr,
 }
-

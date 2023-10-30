@@ -66,6 +66,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
 
 [[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -105,6 +114,7 @@ dependencies = [
 name = "centipede"
 version = "0.1.0"
 dependencies = [
+ "bincode",
  "chacha20poly1305",
  "cidr",
  "ed25519-dalek",
@@ -119,6 +129,7 @@ dependencies = [
  "serde_with",
  "socket2",
  "stakker",
+ "stakker_mio",
  "thiserror",
  "toml",
  "x25519-dalek",
@@ -319,6 +330,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60f6d271ca33075c88028be6f04d502853d63a5ece419d269c15315d4fc1cf1d"
 dependencies = [
  "pkcs8",
+ "serde",
  "signature",
 ]
 
@@ -1081,6 +1093,17 @@ dependencies = [
  "qcell",
  "slab",
  "static_assertions",
+]
+
+[[package]]
+name = "stakker_mio"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16154b5c6cd90159b540161cd7540e693de6a303db0e8192822c4bcce323b499"
+dependencies = [
+ "mio",
+ "slab",
+ "stakker",
 ]
 
 [[package]]

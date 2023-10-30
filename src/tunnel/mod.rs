@@ -75,17 +75,9 @@ pub struct StateTransitioner {
 }
 
 impl StateTransitioner {
-    /// Create a receive tunnel.
-    ///
-    /// # Panics
-    /// A tunnel with this sender ID must not already exist.
-    pub fn create_receive_tunnel(&mut self, sender_id: PeerId, cipher: ChaCha20Poly1305) {
+    /// Insert or update a receive tunnel.
+    pub fn upsert_receive_tunnel(&mut self, sender_id: PeerId, cipher: ChaCha20Poly1305) {
         let recv_tunnels = self.state.recv_tunnels.pin();
-
-        assert!(
-            recv_tunnels.get(&sender_id).is_none(),
-            "tunnel already exists"
-        );
 
         let tunnel = RecvTunnel {
             cipher,
@@ -100,11 +92,8 @@ impl StateTransitioner {
         self.state.recv_tunnels.pin().remove(&sender_id);
     }
 
-    /// Create a send tunnel.
-    ///
-    /// # Panics
-    /// A tunnel with this receiver ID must not already exist.
-    pub fn create_send_tunnel(
+    /// Insert or update a send tunnel.
+    pub fn upsert_send_tunnel(
         &mut self,
         receiver_id: PeerId,
         cipher: ChaCha20Poly1305,
@@ -112,11 +101,6 @@ impl StateTransitioner {
         remote_addrs: Vec<SocketAddr>,
     ) {
         let send_tunnels = self.state.send_tunnels.pin();
-
-        assert!(
-            send_tunnels.get(&receiver_id).is_none(),
-            "tunnel already exists"
-        );
 
         let tunnel = SendTunnel {
             local_addrs,
