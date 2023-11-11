@@ -1,18 +1,18 @@
-use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::control::message::Message;
 
 /// An envelope containing a message or acknowledgement.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum Envelope {
     Message { sequence: u64, message: Message },
     Acknowledgement { sequence: u64 },
 }
 
 /// An envelope which has been authenticated to be from a particular sender.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct AuthenticatedEnvelope {
     /// The public key of the sender.
     pub sender: VerifyingKey,
@@ -22,9 +22,9 @@ pub struct AuthenticatedEnvelope {
 }
 
 impl Envelope {
-    pub fn sign(&self, key: SigningKey) -> Result<SignedEnvelope, Error> {
-        let envelope = bincode::serialize(self).map_err(Error::SerializeEnvelope)?;
-        let signature = key.sign(&envelope).map_err(Error::Sign)?;
+    pub fn sign(&self, key: &SigningKey) -> Result<SignedEnvelope, Error> {
+        let envelope = bincode::serialize(self).expect("failed to serialize envelope");
+        let signature = key.sign(&envelope);
 
         Ok(SignedEnvelope {
             sender: key.verifying_key(),
@@ -35,7 +35,7 @@ impl Envelope {
 }
 
 /// An envelope serialized and signed for authentication by a peer.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SignedEnvelope {
     /// The public key of the sender.
     sender: VerifyingKey,
@@ -48,15 +48,19 @@ pub struct SignedEnvelope {
 }
 
 impl SignedEnvelope {
-    pub fn serialize(&self) -> Result<Vec<u8>, Error> {
-        bincode::serialize(self).map_err(Error::SerializeSignedEnvelope)
+    pub fn serialize(&self) -> Vec<u8> {
+        bincode::serialize(self).expect("failed to serialize signed envelope")
     }
 
     pub fn deserialize(bytes: &[u8]) -> Result<Self, Error> {
         bincode::deserialize(bytes).map_err(Error::DeserializeSignedEnvelope)
     }
 
-    pub fn verify(&self) -> bincode::Result<AuthenticatedEnvelope> {
+    pub fn claimed_sender(&self) -> VerifyingKey {
+        self.sender
+    }
+
+    pub fn verify(&self) -> Result<AuthenticatedEnvelope, Error> {
         let SignedEnvelope {
             sender,
             signature,
@@ -68,7 +72,7 @@ impl SignedEnvelope {
             .map_err(Error::Verify);
 
         Ok(AuthenticatedEnvelope {
-            sender,
+            sender: *sender,
             envelope: bincode::deserialize(&envelope).map_err(Error::DeserializeEnvelope)?,
         })
     }
@@ -76,20 +80,11 @@ impl SignedEnvelope {
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("failed to serialize envelope")]
-    SerializeEnvelope(#[source] bincode::Error),
-
-    #[error("failed to serialize signed envelope")]
-    SerializeSignedEnvelope(#[source] bincode::Error),
-
     #[error("failed to deserialize envelope")]
     DeserializeEnvelope(#[source] bincode::Error),
 
     #[error("failed to deserialize signed envelope")]
     DeserializeSignedEnvelope(#[source] bincode::Error),
-
-    #[error("failed to sign envelope")]
-    Sign(#[source] ed25519_dalek::SignatureError),
 
     #[error("failed to verify signature")]
     Verify(#[source] ed25519_dalek::SignatureError),

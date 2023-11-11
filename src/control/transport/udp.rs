@@ -1,11 +1,12 @@
 use std::{
     io,
     net::SocketAddr,
+    ops::DerefMut,
     os::fd::{FromRawFd, IntoRawFd},
 };
 
 use mio::{net::UdpSocket, Interest};
-use stakker::{fail, fwd_to, idle, Cx, Fwd};
+use stakker::{actor_new, fail, fwd_to, idle, Actor, ActorOwn, Cx, Fwd};
 use stakker_mio::{MioPoll, MioSource, Ready, UdpQueue, UdpServerQueue};
 
 // I/O Priorities:
@@ -33,10 +34,10 @@ pub struct Acceptor {
 impl Acceptor {
     pub fn new(
         cx: &mut Cx<'_, Self>,
-        local_addr: UdpSocket,
+        local_addr: SocketAddr,
         receiver: Fwd<AcceptedSocket>,
     ) -> Option<Self> {
-        let socket = match bind_listener(local_addr.local_addr().unwrap()) {
+        let socket = match bind_listener(local_addr) {
             Ok(socket) => socket,
             Err(e) => {
                 fail!(cx, "failed to bind listener socket: {}", e);
@@ -89,12 +90,7 @@ impl Acceptor {
         }
     }
 
-    fn accept(
-        &mut self,
-        cx: &mut Cx<'_, Self>,
-        remote_addr: SocketAddr,
-        first_message: Vec<u8>,
-    ) {
+    fn accept(&mut self, cx: &mut Cx<'_, Self>, remote_addr: SocketAddr, first_message: Vec<u8>) {
         let mio_poll = cx.anymap_get::<MioPoll>();
 
         let socket = match connect_over(self.local_addr, remote_addr) {
@@ -135,17 +131,9 @@ pub struct AcceptedSocket {
 }
 
 impl AcceptedSocket {
-    pub fn init(self, receiver: Fwd<Vec<u8>>) -> Socket {
-        receiver.fwd(self.first_message);
-
-        let mut queue = UdpQueue::new();
-        queue.init(self.socket);
-
-        Socket {
-            queue,
-            receiver,
-            recv_buf: vec![0; 65536],
-        }
+    /// Peek at the first message.
+    pub fn peek(&self) -> &[u8] {
+        &self.first_message
     }
 }
 
@@ -162,6 +150,21 @@ pub struct Socket {
 }
 
 impl Socket {
+    pub fn from_accepted(
+        cx: &mut Cx<'_, Self>,
+        accepted: AcceptedSocket,
+        receiver: Fwd<Vec<u8>>,
+    ) -> Option<Self> {
+        let mut queue = UdpQueue::new();
+        queue.init(accepted.socket);
+
+        Some(Self {
+            queue,
+            receiver,
+            recv_buf: accepted.first_message,
+        })
+    }
+
     pub fn connect(
         cx: &mut Cx<'_, Self>,
         remote_addr: SocketAddr,
@@ -212,7 +215,7 @@ impl Socket {
             loop {
                 match self.queue.read_to_vec(&mut self.recv_buf) {
                     Ok(Some(data)) => {
-                        self.receiver.send(cx, data);
+                        self.receiver.fwd(data);
                     }
                     Ok(None) => break,
                     Err(e) => {
