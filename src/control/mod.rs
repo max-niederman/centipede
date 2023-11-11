@@ -7,7 +7,6 @@ pub mod message;
 
 mod connection;
 mod transport;
-mod tunnels;
 
 pub enum Command {
     Connection {

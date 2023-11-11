@@ -21,26 +21,10 @@ fn main() {
         .build()
         .unwrap();
 
-    let tunnel_state = tunnel::SharedState::new(config.recv_addresses.clone());
+    let (tunnel_state, tunnel_trans) =
+        tunnel::SharedState::new(todo!(), config.recv_addresses.clone());
 
-    {
-        let mut trans = tunnel_state.transitioner().unwrap();
-
-        for tunnel in config.recv_tunnels {
-            trans.create_receive_tunnel(
-                ChaCha20Poly1305::new_from_slice(&tunnel.key).unwrap(),
-                tunnel.endpoints.iter().map(|e| e.id).collect(),
-            );
-        }
-
-        for tunnel in config.send_tunnels {
-            trans.create_send_tunnel(
-                ChaCha20Poly1305::new_from_slice(&tunnel.key).unwrap(),
-                tunnel.local_addresses,
-                tunnel.endpoints.into_iter().map(Into::into).collect(),
-            );
-        }
-    }
+    todo!("spawn control daemon");
 
     thread::scope(|s| {
         let tunnel_state = &tunnel_state;

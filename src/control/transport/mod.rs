@@ -125,7 +125,7 @@ impl Peer {
     ) -> Option<Self> {
         let socket = actor!(
             cx,
-            <udp::Socket>::from_accepted(accepted.socket, fwd_to!([cx], receive() as (Vec<u8>)))
+            <udp::Socket>::from_accepted(accepted.socket, fwd_to!([cx], receive() as (Vec<u8>))),
             ret_fail!(cx, "failed to create underlying UDP socket")
         );
 
