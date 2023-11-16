@@ -9,12 +9,6 @@ use mio::{net::UdpSocket, Interest};
 use stakker::{actor_new, fail, fwd_to, idle, Actor, ActorOwn, Cx, Fwd};
 use stakker_mio::{MioPoll, MioSource, Ready, UdpQueue, UdpServerQueue};
 
-// I/O Priorities:
-// 0: Listener sockets
-// 1: Connected sockets
-//
-// This prevents a DoS attack on the listener from blocking connected
-// sockets from receiving messages.
 
 /// An actor responsible for accepting inbound connections.
 pub struct Acceptor {

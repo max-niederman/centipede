@@ -1,6 +1,8 @@
+#![feature(split_array)]
+
 use std::{num::NonZeroU32, thread};
 
-use centipede::{config::Config, tunnel};
+use centipede::{config::Config, control, tunnel};
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
 
 fn main() {
@@ -21,10 +23,15 @@ fn main() {
         .build()
         .unwrap();
 
-    let (tunnel_state, tunnel_trans) =
-        tunnel::SharedState::new(todo!(), config.recv_addresses.clone());
+    let (tunnel_state, tunnel_trans) = tunnel::SharedState::new(
+        *config.spec.private_key.to_bytes().split_array_ref::<8>().0,
+        config.recv_addresses.clone(),
+    );
 
-    todo!("spawn control daemon");
+    thread::spawn(move || {
+        control::daemon::entrypoint(tunnel_trans, config.spec, |_| {})
+            .expect("control daemon failed")
+    });
 
     thread::scope(|s| {
         let tunnel_state = &tunnel_state;

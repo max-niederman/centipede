@@ -119,7 +119,26 @@ impl Connection {
         })
     }
 
+    /// Reaccept an existing connection with a new transport.
+    pub fn reaccept(&mut self, cx: &mut Cx<'_, Self>, transport: transport::AcceptedPeer) {
+        let transport = actor!(
+            cx,
+            <transport::Peer>::from_accepted(
+                transport,
+                fwd_to!([cx], handle_inbound_message() as (Message))
+            ),
+            ret_fail!(cx, "failed to create peer")
+        );
+
+        self.transport = transport;
+        self.state = State::AwaitingInitiate;
+    }
+
     pub fn update_local_tunnel_addrs(&mut self, cx: &mut Cx<'_, Self>, addrs: Vec<SocketAddr>) {
+        if self.local_tunnel_addrs == addrs {
+            return;
+        }
+
         self.local_tunnel_addrs = addrs;
 
         call!(
@@ -132,6 +151,7 @@ impl Connection {
 
     /// Handle an inbound control message.
     fn handle_inbound_message(&mut self, cx: &mut Cx<'_, Self>, message: Message) {
+        // TODO: use `replace_with`
         self.state = match (mem::take(&mut self.state), message) {
             (State::AwaitingInitiate, Message::Initiate { ecdh_public_key }) => {
                 let ecdh_private_key =
@@ -147,7 +167,7 @@ impl Connection {
 
                 let ecdh_shared_secret = ecdh_private_key.diffie_hellman(&ecdh_public_key);
 
-                self.upsert_receive_tunnel(cx, ecdh_shared_secret);
+                self.upsert_receive_tunnel(cx, &ecdh_shared_secret);
 
                 State::InboundEstablished { ecdh_shared_secret }
             }
@@ -168,7 +188,7 @@ impl Connection {
 
                 let ecdh_shared_secret = ecdh_private_key.diffie_hellman(&ecdh_public_key);
 
-                self.upsert_receive_tunnel(cx, ecdh_shared_secret);
+                self.upsert_receive_tunnel(cx, &ecdh_shared_secret);
 
                 State::InboundEstablished { ecdh_shared_secret }
             }
@@ -177,7 +197,7 @@ impl Connection {
                 State::InboundEstablished { ecdh_shared_secret },
                 Message::UpdateAddresses { addresses },
             ) => {
-                self.upsert_send_tunnel(cx, ecdh_shared_secret, addresses);
+                self.upsert_send_tunnel(cx, &ecdh_shared_secret, addresses);
 
                 State::InboundEstablished { ecdh_shared_secret }
             }
@@ -195,7 +215,7 @@ impl Connection {
     fn upsert_receive_tunnel(
         &mut self,
         cx: &mut Cx<'_, Self>,
-        ecdh_shared_secret: x25519_dalek::SharedSecret,
+        ecdh_shared_secret: &x25519_dalek::SharedSecret,
     ) {
         let (&peer_id, _) = self.peer_key.to_bytes().split_array_ref::<8>();
         self.tunnel_trans.rw(cx).upsert_receive_tunnel(
@@ -207,7 +227,7 @@ impl Connection {
     fn upsert_send_tunnel(
         &mut self,
         cx: &mut Cx<'_, Self>,
-        ecdh_shared_secret: x25519_dalek::SharedSecret,
+        ecdh_shared_secret: &x25519_dalek::SharedSecret,
         remote_addrs: Vec<SocketAddr>,
     ) {
         let (&peer_id, _) = self.peer_key.to_bytes().split_array_ref::<8>();

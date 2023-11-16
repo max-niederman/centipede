@@ -1,15 +1,12 @@
 use std::{
-    collections::{BTreeSet, HashMap, VecDeque},
+    collections::{BTreeSet, HashMap},
     net::SocketAddr,
     rc::Rc,
     time::Duration,
 };
 
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use stakker::{
-    actor, actor_new, after, call, fail, fwd_to, lazy, ret_fail, ret_failthru, ActorOwn, Cx, Fwd,
-    Ret,
-};
+use stakker::{actor, after, call, fail, fwd_to, lazy, ret_fail, ActorOwn, Cx, Fwd};
 
 use crate::control::transport::envelope::{Envelope, SignedEnvelope};
 
@@ -35,7 +32,7 @@ pub struct Acceptor {
 impl Acceptor {
     pub fn new(
         cx: &mut Cx<'_, Self>,
-        private_key: SigningKey,
+        private_key: Rc<SigningKey>,
         local_addr: SocketAddr,
         receiver: Fwd<AcceptedPeer>,
     ) -> Option<Self> {
@@ -47,7 +44,7 @@ impl Acceptor {
 
         Some(Self {
             udp_acceptor,
-            private_key: Rc::new(private_key),
+            private_key,
             receiver,
         })
     }

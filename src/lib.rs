@@ -1,5 +1,5 @@
 #![feature(
-    box_patterns,
+    if_let_guard,
     iterator_try_collect,
     split_array,
     maybe_uninit_slice,

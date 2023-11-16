@@ -3,6 +3,8 @@ use std::{ffi::CString, net::SocketAddr};
 use cidr::IpInet;
 use serde::{Deserialize, Serialize};
 
+use crate::control;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     /// Address of the host inside the VPN.
@@ -17,4 +19,7 @@ pub struct Config {
 
     /// Local addresses on which to receive messages.
     pub recv_addresses: Vec<SocketAddr>,
+
+    #[serde(flatten)]
+    pub spec: control::Spec,
 }

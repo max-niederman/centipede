@@ -15,6 +15,7 @@ mio = { version = "0.8.8", features = ["os-poll", "os-ext"] }
 num_cpus = "1.16.0"
 pretty_env_logger = "0.5.0"
 rand = "0.8.5"
+replace_with = "0.1.7"
 serde = { version = "1.0.188", features = ["derive"] }
 serde_with = { version = "3.3.0", features = ["base64"] }
 socket2 = { version = "0.5.3", features = ["all"] }

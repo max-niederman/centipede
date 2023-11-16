@@ -1,6 +1,5 @@
 use std::net::SocketAddr;
 
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,4 +34,6 @@ pub enum Message {
         /// Socket addresses on which the sender is listening.
         addresses: Vec<SocketAddr>,
     },
+
+    // TODO: add close message
 }
