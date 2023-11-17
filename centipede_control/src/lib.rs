@@ -1,11 +1,13 @@
-//! The control plane.
-//!
-//! # I/O Priority Levels:
-//! 0. Listener sockets
-//! 1. Connected sockets
-//!
-//! This prevents a DoS attack on the listener from blocking connected
-//! sockets from receiving messages.
+//! The control plane of the Centipede VPN.
+
+// # I/O Priority Levels:
+// 0. Listener sockets
+// 1. Connected sockets
+//
+// This prevents a DoS attack on the listener from blocking connected
+// sockets from receiving messages.
+
+#![feature(split_array)]
 
 use std::{collections::HashMap, net::SocketAddr, rc::Rc};
 
@@ -13,8 +15,6 @@ use ed25519_dalek::{SigningKey, VerifyingKey};
 use replace_with::replace_with_or_abort;
 use serde::{Deserialize, Serialize};
 use stakker::{actor, call, fwd_to, ret_fail, ret_panic, ActorOwn, Cx, Share};
-
-use crate::tunnel;
 
 use self::connection::Connection;
 
@@ -53,7 +53,7 @@ pub struct ConnectionSpec {
 /// The controller.
 pub struct Controller {
     /// The tunnel state transitioner.
-    tunnel_trans: Share<tunnel::StateTransitioner>,
+    tunnel_trans: Share<centipede_tunnel::StateTransitioner>,
 
     /// Our private key.
     private_key: Rc<SigningKey>,
@@ -79,7 +79,7 @@ impl Controller {
     /// Create a new controller.
     pub fn new(
         cx: &mut Cx<'_, Self>,
-        tunnel_trans: Share<tunnel::StateTransitioner>,
+        tunnel_trans: Share<centipede_tunnel::StateTransitioner>,
         init_spec: Spec,
     ) -> Option<Self> {
         let private_key = Rc::new(init_spec.private_key);

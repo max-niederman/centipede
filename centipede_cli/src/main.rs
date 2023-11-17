@@ -4,7 +4,9 @@ use std::{collections::HashSet, path::Path, thread};
 
 use base64::prelude::*;
 
-use centipede::{config::Config, control, tunnel};
+use config::Config;
+
+mod config;
 
 fn main() {
     pretty_env_logger::init();
@@ -58,7 +60,7 @@ fn daemon(config_path: &Path) {
 
     let spec = config.as_spec();
 
-    let (tunnel_state, tunnel_trans) = tunnel::SharedState::new(
+    let (tunnel_state, tunnel_trans) = centipede_tunnel::SharedState::new(
         *config
             .private_key()
             .verifying_key()
@@ -84,13 +86,17 @@ fn daemon(config_path: &Path) {
 
         for i in 0..config.workers {
             s.spawn(move || {
-                tunnel::worker::entrypoint(tunnel_state, &tun.queue_nonblocking(i).unwrap())
-                    .unwrap();
+                centipede_tunnel::worker::entrypoint(
+                    tunnel_state,
+                    &tun.queue_nonblocking(i).unwrap(),
+                )
+                .unwrap();
             });
         }
 
         s.spawn(move || {
-            control::daemon::entrypoint(tunnel_trans, spec, |_| {}).expect("control daemon failed")
+            centipede_control::daemon::entrypoint(tunnel_trans, spec, |_| {})
+                .expect("control daemon failed")
         })
         .join()
         .unwrap()

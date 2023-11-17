@@ -2,7 +2,7 @@ use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::control::message::Message;
+use crate::message::Message;
 
 /// An envelope containing a message or acknowledgement.
 #[derive(Debug, Clone, Deserialize, Serialize)]

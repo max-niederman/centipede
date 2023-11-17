@@ -5,13 +5,11 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use stakker::{
-    actor, actor_new, call, fwd_to, ret_fail, ret_failthru, ret_nop, ret_shutdown,
+    actor, actor_new, call, fwd_to, ret_fail, ret_nop,
     sync::{Channel, ChannelGuard},
     ActorOwn, Cx, Share, Stakker, StopCause,
 };
 use stakker_mio::MioPoll;
-
-use crate::tunnel;
 
 use super::{Controller, Spec};
 
@@ -24,7 +22,7 @@ pub enum Command {
 
 /// The entrypoint of the control daemon.
 pub fn entrypoint(
-    tunnel_trans: tunnel::StateTransitioner,
+    tunnel_trans: centipede_tunnel::StateTransitioner,
     init_spec: Spec,
     commander: impl FnOnce(Channel<Command>),
 ) -> Result<(), Box<dyn Error>> {
@@ -80,7 +78,7 @@ struct Daemon {
 impl Daemon {
     fn new(
         cx: &mut Cx<'_, Self>,
-        tunnel_trans: Share<tunnel::StateTransitioner>,
+        tunnel_trans: Share<centipede_tunnel::StateTransitioner>,
         init_spec: Spec,
         cmd_guard: ChannelGuard,
     ) -> Option<Self> {

@@ -1,3 +1,12 @@
+//! The data plane of the Centipede VPN.
+
+#![feature(
+    iterator_try_collect,
+    maybe_uninit_slice,
+    maybe_uninit_uninit_array,
+    never_type
+)]
+
 use std::{
     net::SocketAddr,
     sync::{atomic::AtomicU64, Arc},

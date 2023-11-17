@@ -4,8 +4,6 @@ use cidr::IpInet;
 use serde::{Deserialize, Serialize};
 use serde_with::{base64::Base64, serde_as};
 
-use crate::control;
-
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -57,8 +55,8 @@ impl Config {
         ed25519_dalek::SigningKey::from_bytes(&self.private_key)
     }
 
-    pub fn as_spec(&self) -> control::Spec {
-        control::Spec {
+    pub fn as_spec(&self) -> centipede_control::Spec {
+        centipede_control::Spec {
             private_key: self.private_key(),
             local_control_address: self.local_control_address,
             peers: self
@@ -67,7 +65,7 @@ impl Config {
                 .map(|peer_config| {
                     (
                         peer_config.public_key(),
-                        control::ConnectionSpec {
+                        centipede_control::ConnectionSpec {
                             local_tunnel_addresses: peer_config.local_tunnel_addresses.clone(),
                             remote_control_address: peer_config.remote_control_address,
                         },

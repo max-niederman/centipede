@@ -4,14 +4,12 @@ use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use stakker::{actor, call, fail, fwd_to, ret_fail, Actor, ActorOwn, Cx, Share};
 
-use crate::tunnel;
-
 use super::{message::Message, transport};
 
 /// The actor responsible for managing a connection to a peer.
 pub struct Connection {
     /// The tunnel state transitioner.
-    tunnel_trans: Share<tunnel::StateTransitioner>,
+    tunnel_trans: Share<centipede_tunnel::StateTransitioner>,
 
     /// The public key of the peer.
     peer_key: VerifyingKey,
@@ -56,7 +54,7 @@ impl Connection {
     /// Create a new connection on the initiating side.
     pub fn initiate(
         cx: &mut Cx<'_, Self>,
-        tunnel_trans: Share<tunnel::StateTransitioner>,
+        tunnel_trans: Share<centipede_tunnel::StateTransitioner>,
         local_tunnel_addrs: Vec<SocketAddr>,
         private_key: Rc<SigningKey>,
         peer_key: VerifyingKey,
@@ -95,7 +93,7 @@ impl Connection {
     /// Accept a new connection on the responding side.
     pub fn accept(
         cx: &mut Cx<'_, Self>,
-        tunnel_trans: Share<tunnel::StateTransitioner>,
+        tunnel_trans: Share<centipede_tunnel::StateTransitioner>,
         local_tunnel_addrs: Vec<SocketAddr>,
         transport: transport::AcceptedPeer,
     ) -> Option<Self> {

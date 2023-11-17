@@ -8,9 +8,7 @@ use std::{
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use stakker::{actor, after, call, fail, fwd_to, lazy, ret_fail, ActorOwn, Cx, Fwd};
 
-use crate::control::transport::envelope::{Envelope, SignedEnvelope};
-
-use self::envelope::AuthenticatedEnvelope;
+use envelope::{AuthenticatedEnvelope, Envelope, SignedEnvelope};
 
 use super::message::Message;
 
