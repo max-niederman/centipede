@@ -125,7 +125,7 @@ impl Controller {
                             local_tunnel_addresses,
                             transport,
                         ),
-                        ret_panic!("todo: handle connection failure")
+                        ret_fail!(cx, "todo: handle connection failure")
                     );
 
                     PeerState::Initiated(connection)

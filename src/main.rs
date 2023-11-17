@@ -1,17 +1,50 @@
 #![feature(split_array)]
 
-use std::{num::NonZeroU32, thread};
+use std::{collections::HashSet, path::Path, thread};
+
+use base64::prelude::*;
 
 use centipede::{config::Config, control, tunnel};
-use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
 
 fn main() {
     pretty_env_logger::init();
 
-    let config_path = std::env::args().nth(1).expect("Usage: centipede <config>");
-    let config_raw = std::fs::read_to_string(&config_path).expect("Failed to open config file.");
+    let args = std::env::args().collect::<Vec<_>>();
+    let args: Vec<_> = args.iter().collect();
+
+    if args.len() != 2 {
+        eprintln!("Usage: centipede <config>");
+        std::process::exit(1);
+    }
+
+    match args[1].as_str() {
+        "--help" => {
+            eprintln!("Usage: centipede <config>");
+            std::process::exit(0);
+        }
+        "--version" => {
+            eprintln!("centipede {}", env!("CARGO_PKG_VERSION"));
+            std::process::exit(0);
+        }
+        "genkey" => {
+            let key = ed25519_dalek::SigningKey::generate(&mut rand::thread_rng());
+
+            println!(
+                "public key: {}",
+                BASE64_STANDARD.encode(key.verifying_key().to_bytes())
+            );
+            println!("private key: {}", BASE64_STANDARD.encode(key.to_bytes()));
+
+            std::process::exit(0);
+        }
+        config_path => daemon(config_path.as_ref()),
+    }
+}
+
+fn daemon(config_path: &Path) {
+    let config_raw = std::fs::read_to_string(config_path).expect("Failed to open config file.");
     let config: Config = toml::from_str(&config_raw).expect("Failed to parse config file.");
-    log::info!("loaded config from {config_path}");
+    log::info!("loaded config from {config_path:?}");
 
     let tun = hypertube::builder()
         .with_name(config.if_name.clone())
@@ -23,15 +56,27 @@ fn main() {
         .build()
         .unwrap();
 
-    let (tunnel_state, tunnel_trans) = tunnel::SharedState::new(
-        *config.spec.private_key.to_bytes().split_array_ref::<8>().0,
-        config.recv_addresses.clone(),
-    );
+    let spec = config.as_spec();
 
-    thread::spawn(move || {
-        control::daemon::entrypoint(tunnel_trans, config.spec, |_| {})
-            .expect("control daemon failed")
-    });
+    let (tunnel_state, tunnel_trans) = tunnel::SharedState::new(
+        *config
+            .private_key()
+            .verifying_key()
+            .to_bytes()
+            .split_array_ref::<8>()
+            .0,
+        config
+            .peers
+            .iter()
+            .map(|peer| peer.local_tunnel_addresses.iter())
+            .flatten()
+            .fold(HashSet::new(), |mut acc, &addr| {
+                acc.insert(addr);
+                acc
+            })
+            .into_iter()
+            .collect(),
+    );
 
     thread::scope(|s| {
         let tunnel_state = &tunnel_state;
@@ -43,5 +88,11 @@ fn main() {
                     .unwrap();
             });
         }
+
+        s.spawn(move || {
+            control::daemon::entrypoint(tunnel_trans, spec, |_| {}).expect("control daemon failed")
+        })
+        .join()
+        .unwrap()
     });
 }

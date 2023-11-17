@@ -11,3 +11,11 @@ Centipede uses two distinct protocols to establish and maintain a VPN connection
 - "Control" protocol: Control messages initiate tunnel connections by coordinating encryption keys and IDs for each socket address.
   To initiate a connection, control messages are sent normally across the public Internet, but after a connection is established they can be sent through the VPN tunnel for improved reliability.
   This is not yet implemented.
+
+## To-Dos
+
+- Implement local tunnel address switching.
+- Enable multiple remote control addresses and transports per peer.
+- Handle connection failure in `Controller`.
+- Use `recvmmsg` and `sendmmsg` to increase throughput.
+- Implement routing.

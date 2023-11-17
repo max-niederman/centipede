@@ -139,6 +139,8 @@ impl Connection {
             return;
         }
 
+        todo!("update receive tunnel addresses");
+
         self.local_tunnel_addrs = addrs;
 
         call!(

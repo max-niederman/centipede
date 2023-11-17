@@ -1,15 +1,9 @@
 address = "10.0.10.2/24"
 if_name = "cp1"
-recv_addresses = ["10.0.1.2:5000", "10.0.1.2:5001"]
+private_key = "QJVxWbA6o/3kk5znUyD5rySYe+yG829uGNoh2PNVyxk="
+local_control_address = "10.0.1.2:5000"
 
-[[recv_tunnels]]
-key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE="
-endpoints = [{ id = 1 }, { id = 2 }]
-
-[[send_tunnels]]
-local_addresses = ["10.0.1.2:5000", "10.0.1.2:5001"]
-key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAI="
-endpoints = [
-    { id = 1, address = "10.0.1.1:5000" },
-    { id = 2, address = "10.0.1.1:5001" },
-]
+[[peers]]
+public_key = "Gb1SnzVaODF8LHKoBD+dJtS/e/9GYEhnLX0sOk8OIbA="
+remote_control_address = "10.0.1.1:5000"
+local_tunnel_addresses = ["10.0.1.2:5010", "10.0.1.2:5011"]

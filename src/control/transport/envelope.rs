@@ -69,7 +69,7 @@ impl SignedEnvelope {
 
         sender
             .verify_strict(&envelope, &signature)
-            .map_err(Error::Verify);
+            .map_err(Error::Verify)?;
 
         Ok(AuthenticatedEnvelope {
             sender: *sender,

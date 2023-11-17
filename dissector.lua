@@ -20,5 +20,5 @@ function tunnel_proto.dissector(buffer, pinfo, tree)
 end
 
 udp_table = DissectorTable.get("udp.port")
-udp_table:add(5000, tunnel_proto)
-udp_table:add(5001, tunnel_proto)
+udp_table:add(5010, tunnel_proto)
+udp_table:add(5011, tunnel_proto)
