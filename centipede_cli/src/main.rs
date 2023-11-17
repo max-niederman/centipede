@@ -70,8 +70,7 @@ fn daemon(config_path: &Path) {
         config
             .peers
             .iter()
-            .map(|peer| peer.local_tunnel_addresses.iter())
-            .flatten()
+            .flat_map(|peer| peer.local_tunnel_addresses.iter())
             .fold(HashSet::new(), |mut acc, &addr| {
                 acc.insert(addr);
                 acc

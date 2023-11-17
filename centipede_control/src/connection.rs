@@ -2,7 +2,7 @@ use std::{mem, net::SocketAddr, rc::Rc};
 
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use stakker::{actor, call, fail, fwd_to, ret_fail, Actor, ActorOwn, Cx, Share};
+use stakker::{actor, call, fail, fwd_to, ret_fail, ActorOwn, Cx, Share};
 
 use super::{message::Message, transport};
 
@@ -60,8 +60,7 @@ impl Connection {
         peer_key: VerifyingKey,
         peer_addr: SocketAddr,
     ) -> Option<Self> {
-        let ecdh_private_key =
-            x25519_dalek::EphemeralSecret::random_from_rng(&mut rand::thread_rng());
+        let ecdh_private_key = x25519_dalek::EphemeralSecret::random_from_rng(rand::thread_rng());
 
         let transport = actor!(
             cx,
@@ -132,7 +131,7 @@ impl Connection {
         self.state = State::AwaitingInitiate;
     }
 
-    pub fn update_local_tunnel_addrs(&mut self, cx: &mut Cx<'_, Self>, addrs: Vec<SocketAddr>) {
+    pub fn update_local_tunnel_addrs(&mut self, _cx: &mut Cx<'_, Self>, addrs: Vec<SocketAddr>) {
         if self.local_tunnel_addrs == addrs {
             return;
         }
@@ -155,13 +154,13 @@ impl Connection {
         self.state = match (mem::take(&mut self.state), message) {
             (State::AwaitingInitiate, Message::Initiate { ecdh_public_key }) => {
                 let ecdh_private_key =
-                    x25519_dalek::EphemeralSecret::random_from_rng(&mut rand::thread_rng());
+                    x25519_dalek::EphemeralSecret::random_from_rng(rand::thread_rng());
 
                 call!(
                     [self.transport],
                     send(Message::InitiateAck {
                         ecdh_public_key: x25519_dalek::PublicKey::from(&ecdh_private_key),
-                        responder_addresses: todo!(),
+                        responder_addresses: self.local_tunnel_addrs.clone(),
                     })
                 );
 
@@ -175,8 +174,7 @@ impl Connection {
             (
                 State::AwaitingInitiateAck { ecdh_private_key },
                 Message::InitiateAck {
-                    ecdh_public_key,
-                    responder_addresses,
+                    ecdh_public_key, ..
                 },
             ) => {
                 call!(
@@ -202,7 +200,7 @@ impl Connection {
                 State::InboundEstablished { ecdh_shared_secret }
             }
 
-            (old_state, message) => {
+            (old_state, _message) => {
                 fail!(
                     cx,
                     "received unexpected message for state: {message:#?} for {state:#?}"

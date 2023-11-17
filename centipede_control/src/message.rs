@@ -34,6 +34,5 @@ pub enum Message {
         /// Socket addresses on which the sender is listening.
         addresses: Vec<SocketAddr>,
     },
-
     // TODO: add close message
 }

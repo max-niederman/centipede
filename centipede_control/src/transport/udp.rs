@@ -1,14 +1,12 @@
 use std::{
     io,
     net::SocketAddr,
-    ops::DerefMut,
     os::fd::{FromRawFd, IntoRawFd},
 };
 
 use mio::{net::UdpSocket, Interest};
-use stakker::{actor_new, fail, fwd_to, idle, Actor, ActorOwn, Cx, Fwd};
+use stakker::{fail, fwd_to, idle, Cx, Fwd};
 use stakker_mio::{MioPoll, MioSource, Ready, UdpQueue, UdpServerQueue};
-
 
 /// An actor responsible for accepting inbound connections.
 pub struct Acceptor {
@@ -145,7 +143,7 @@ pub struct Socket {
 
 impl Socket {
     pub fn from_accepted(
-        cx: &mut Cx<'_, Self>,
+        _cx: &mut Cx<'_, Self>,
         accepted: AcceptedSocket,
         receiver: Fwd<Vec<u8>>,
     ) -> Option<Self> {
@@ -202,7 +200,13 @@ impl Socket {
 
     fn ready(&mut self, cx: &mut Cx<'_, Self>, ready: Ready) {
         if ready.is_writable() {
-            self.queue.flush();
+            match self.queue.flush() {
+                Ok(()) => {}
+                Err(e) => {
+                    fail!(cx, "UDP write error: {}", e);
+                    return;
+                }
+            }
         }
 
         if ready.is_readable() {

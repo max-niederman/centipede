@@ -47,7 +47,7 @@ impl Acceptor {
         })
     }
 
-    fn accept(&mut self, cx: &mut Cx<'_, Self>, socket: udp::AcceptedSocket) {
+    fn accept(&mut self, _cx: &mut Cx<'_, Self>, socket: udp::AcceptedSocket) {
         let envelope = match SignedEnvelope::deserialize(socket.peek()) {
             Ok(envelope) => envelope,
             Err(e) => {

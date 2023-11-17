@@ -68,12 +68,12 @@ impl SignedEnvelope {
         } = self;
 
         sender
-            .verify_strict(&envelope, &signature)
+            .verify_strict(envelope, signature)
             .map_err(Error::Verify)?;
 
         Ok(AuthenticatedEnvelope {
             sender: *sender,
-            envelope: bincode::deserialize(&envelope).map_err(Error::DeserializeEnvelope)?,
+            envelope: bincode::deserialize(envelope).map_err(Error::DeserializeEnvelope)?,
         })
     }
 }

@@ -152,14 +152,14 @@ mod tests {
         let bitset = CircularConcurrentBitset::new(10);
 
         // Basic get and set.
-        assert_eq!(bitset.get(0), false);
-        assert_eq!(bitset.set(0, true), false);
-        assert_eq!(bitset.get(0), true);
+        assert!(!bitset.get(0));
+        assert!(!bitset.set(0, true));
+        assert!(bitset.get(0));
 
         // Wrap around get and set.
-        assert_eq!(bitset.get(13), false);
-        assert_eq!(bitset.set(13, true), false);
-        assert_eq!(bitset.get(13), true);
+        assert!(!bitset.get(13));
+        assert!(!bitset.set(13, true));
+        assert!(bitset.get(13));
 
         // Range zeroing.
         bitset.set(1, true);
@@ -168,12 +168,12 @@ mod tests {
         bitset.set(9, true);
 
         bitset.zero_range(1..4); // Zero range [1, 2, 3]
-        assert_eq!(bitset.get(0), true); // Bit 0 was not changed
-        assert_eq!(bitset.get(1), false);
-        assert_eq!(bitset.get(2), false);
-        assert_eq!(bitset.get(3), false);
-        assert_eq!(bitset.get(4), true); // Bit 4 was not changed
-        assert_eq!(bitset.get(9), true); // Bit 9 was not changed
+        assert!(bitset.get(0)); // Bit 0 was not changed
+        assert!(!bitset.get(1));
+        assert!(!bitset.get(2));
+        assert!(!bitset.get(3));
+        assert!(bitset.get(4)); // Bit 4 was not changed
+        assert!(bitset.get(9)); // Bit 9 was not changed
 
         bitset.zero_range(8..12); // Zero range [8, 9, 0, 1]
         for i in 0..10 {

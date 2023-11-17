@@ -16,7 +16,7 @@ use super::{Controller, Spec};
 /// A daemon command.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Command {
-    UpdateSpec(Spec),
+    UpdateSpec(Box<Spec>),
     Stop,
 }
 
@@ -43,7 +43,7 @@ pub fn entrypoint(
 
     call!(
         [daemon],
-        Daemon::new(Share::new(&*stakker, tunnel_trans), init_spec, cmd_guard)
+        Daemon::new(Share::new(&stakker, tunnel_trans), init_spec, cmd_guard)
     );
 
     commander(cmd_channel);
@@ -97,7 +97,7 @@ impl Daemon {
     fn receive_command(&mut self, cx: &mut Cx<'_, Self>, cmd: Command) {
         match cmd {
             Command::UpdateSpec(spec) => {
-                call!([self.controller], update_spec(spec))
+                call!([self.controller], update_spec(*spec))
             }
             Command::Stop => {
                 // TODO: does this actually shut down the event loop?
