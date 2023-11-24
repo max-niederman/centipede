@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["centipede_cli", "centipede_control", "centipede_tunnel"]
+members = ["packages/*"]
 
 [profile.dev]
 opt-level = 1
