@@ -7,7 +7,7 @@ use thiserror::Error;
 use crate::auth;
 
 /// A parsed control message used to establish and maintain a connection.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Message<A>
 where
     A: auth::Status,
@@ -41,7 +41,6 @@ pub enum MessageKind {
 /// The payload of a control message.
 /// Carries the actual content without authentication.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type")]
 pub enum Payload {
     /// Initiate a connection.
     ///
@@ -75,16 +74,38 @@ pub enum Payload {
 }
 
 impl<A: auth::Status> Message<A> {
+    /// The claimed sender public key of this message.
     pub fn claimed_sender(&self) -> &ed25519_dalek::VerifyingKey {
         &self.sender
     }
 
+    /// The claimed sequence number of this message.
     pub fn claimed_sequence_number(&self) -> u64 {
         self.sequence_number
+    }
+
+    /// The claimed content of this message.
+    pub fn claimed_content(&self) -> &MessageKind {
+        &self.content
     }
 }
 
 impl Message<auth::Valid> {
+    /// The validated sender public key of this message.
+    pub fn sender(&self) -> &ed25519_dalek::VerifyingKey {
+        self.claimed_sender()
+    }
+
+    /// The validated sequence number of this message.
+    pub fn sequence_number(&self) -> u64 {
+        self.claimed_sequence_number()
+    }
+
+    /// The validated content of this message.
+    pub fn content(&self) -> &MessageKind {
+        self.claimed_content()
+    }
+
     /// Create a new control message.
     pub fn serialize(
         signing_key: &ed25519_dalek::SigningKey,
@@ -228,4 +249,78 @@ pub struct ValidateError {
 
     #[source]
     pub reason: ed25519_dalek::SignatureError,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serialize_deserialize_payload() {
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&[1; 32]);
+        let verifying_key = signing_key.verifying_key();
+
+        let sequence_number = 42;
+        let payload = Payload::Initiate {
+            ecdh_public_key: x25519_dalek::PublicKey::from([0; 32]),
+        };
+
+        let buffer = Message::<auth::Valid>::serialize(
+            &signing_key,
+            sequence_number,
+            MessageKind::Payload(payload.clone()),
+        );
+
+        let message = Message::<auth::Valid>::parse_and_validate(&buffer).unwrap();
+
+        assert_eq!(message.sender(), &verifying_key);
+        assert_eq!(message.sequence_number(), sequence_number);
+        assert_eq!(*message.content(), MessageKind::Payload(payload));
+    }
+
+    #[test]
+    fn serialize_deserialize_ack() {
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&[1; 32]);
+        let verifying_key = signing_key.verifying_key();
+
+        let sequence_number = 43;
+
+        let buffer =
+            Message::<auth::Valid>::serialize(&signing_key, sequence_number, MessageKind::Ack);
+
+        let message = Message::<auth::Valid>::parse_and_validate(&buffer).unwrap();
+
+        assert_eq!(message.sender(), &verifying_key);
+        assert_eq!(message.sequence_number(), sequence_number);
+        assert_eq!(*message.content(), MessageKind::Ack);
+    }
+
+    #[test]
+    fn deserialize_invalid_signature() {
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&[1; 32]);
+        let verifying_key = signing_key.verifying_key();
+
+        let sequence_number = 44;
+        let payload = Payload::Initiate {
+            ecdh_public_key: x25519_dalek::PublicKey::from([0; 32]),
+        };
+
+        let mut buffer = Message::<auth::Valid>::serialize(
+            &signing_key,
+            sequence_number,
+            MessageKind::Payload(payload.clone()),
+        );
+
+        buffer[SIGNATURE_RANGE][0] ^= 1;
+
+        match Message::<auth::Valid>::parse_and_validate(&buffer) {
+            Err(ParseValidateError::Validate(ValidateError { message, .. })) => {
+                assert_eq!(*message.claimed_sender(), verifying_key);
+                assert_eq!(message.claimed_sequence_number(), sequence_number);
+                assert_eq!(*message.claimed_content(), MessageKind::Payload(payload));
+            }
+            Err(e) => panic!("unexpected error: {}", e),
+            Ok(_) => panic!("unexpected success"),
+        }
+    }
 }
