@@ -22,13 +22,6 @@ where
     _auth: PhantomData<A>,
 }
 
-// Ranges of the message buffer.
-const SEQUENCE_NUMBER_RANGE: Range<usize> = 0..8;
-const SENDER_RANGE: Range<usize> = 8..16;
-const NONCE_RANGE: Range<usize> = 0..12;
-const TAG_RANGE: Range<usize> = 16..32;
-const PACKET_RANGE: RangeFrom<usize> = 32..;
-
 impl<B, A> Message<B, A>
 where
     B: Deref<Target = [u8]>,
@@ -86,9 +79,9 @@ where
     /// Create a message from a buffer.
     ///
     /// This validates the buffer's structure, but does not verify its signature.
-    pub fn from_buffer(buffer: B) -> Result<Self, Error> {
-        if buffer.len() < 32 {
-            return Err(Error::BufferTooSmall);
+    pub fn from_buffer(buffer: B) -> Result<Self, ParseError> {
+        if buffer.len() < PACKET_RANGE.start {
+            return Err(ParseError::BufferTooSmall);
         }
 
         Ok(Self {
@@ -132,10 +125,7 @@ where
             packet,
             Tag::from_slice(&header[TAG_RANGE]),
         ) {
-            Ok(()) => Ok(Message {
-                buffer: self.buffer,
-                _auth: PhantomData,
-            }),
+            Ok(()) => Ok(self.attest()),
             Err(reason) => Err(DecryptionError {
                 message: self.invalidate(),
                 reason,
@@ -180,6 +170,13 @@ where
     }
 }
 
+// Ranges of the message buffer.
+const SEQUENCE_NUMBER_RANGE: Range<usize> = 0..8;
+const SENDER_RANGE: Range<usize> = 8..16;
+const NONCE_RANGE: Range<usize> = 0..12;
+const TAG_RANGE: Range<usize> = 16..32;
+const PACKET_RANGE: RangeFrom<usize> = 32..;
+
 impl<B, A> Debug for Message<B, A>
 where
     B: Deref<Target = [u8]>,
@@ -188,21 +185,20 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Message {{ seq: {}, sender: {:#x}, packet: [..][{}] }}",
+            "Message {{ seq: {}, sender: {:#x}, packet: [..][{}], _auth: {} }}",
             self.claimed_sequence_number(),
             u64::from_be_bytes(self.claimed_sender()),
-            self.buffer[PACKET_RANGE].len()
+            self.buffer[PACKET_RANGE].len(),
+            A::NAME,
         )
     }
 }
 
+/// An error representing a failure to parse a packet message.
 #[derive(Debug, Error)]
-pub enum Error {
+pub enum ParseError {
     #[error("attempted to parse a packet message from too small a buffer")]
     BufferTooSmall,
-
-    #[error(transparent)]
-    Decryption(DecryptionError<Vec<u8>>),
 }
 
 /// An error representing a failure to authenticate a packet message.
@@ -213,16 +209,4 @@ pub struct DecryptionError<B: Deref<Target = [u8]>> {
 
     #[source]
     pub reason: chacha20poly1305::Error,
-}
-
-impl<B> From<DecryptionError<B>> for Error
-where
-    B: Deref<Target = [u8]>,
-{
-    fn from(error: DecryptionError<B>) -> Self {
-        Self::Decryption(DecryptionError {
-            message: error.message.to_owned(),
-            reason: error.reason,
-        })
-    }
 }
