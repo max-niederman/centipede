@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 # create the peer namespace
 ip netns add peer
 

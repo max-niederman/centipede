@@ -1,5 +1,6 @@
 use std::{
     fmt::Debug,
+    io::{self, Read},
     marker::PhantomData,
     ops::{Deref, DerefMut, Range, RangeFrom},
 };
@@ -7,25 +8,31 @@ use std::{
 use chacha20poly1305::{AeadInPlace, ChaCha20Poly1305, Nonce, Tag};
 use thiserror::Error;
 
-use crate::auth;
+use crate::marker::{auth, text};
 
+/// A packet message.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Message<B, A>
+pub struct Message<B, A, T>
 where
     B: Deref<Target = [u8]>,
     A: auth::Status,
+    T: text::Kind,
 {
     /// The buffer containing the message.
     buffer: B,
 
     /// Marker for the authentication status.
     _auth: PhantomData<A>,
+
+    /// Marker for the text kind.
+    _text: PhantomData<T>,
 }
 
-impl<B, A> Message<B, A>
+impl<B, A, T> Message<B, A, T>
 where
     B: Deref<Target = [u8]>,
     A: auth::Status,
+    T: text::Kind,
 {
     /// The claimed sequence number of this message.
     pub fn claimed_sequence_number(&self) -> u64 {
@@ -38,23 +45,47 @@ where
     }
 
     /// Forget the message's authentication status.
-    pub fn forget_auth(self) -> Message<B, auth::Unknown> {
+    pub fn forget_auth(self) -> Message<B, auth::Unknown, T> {
         Message {
             buffer: self.buffer,
             _auth: PhantomData,
+            _text: PhantomData,
+        }
+    }
+
+    /// Attest that the message is valid, without validating its signature.
+    ///
+    /// This function should be treated with the utmost caution.
+    pub unsafe fn attest(self) -> Message<B, auth::Valid, T> {
+        Message {
+            buffer: self.buffer,
+            _auth: PhantomData,
+            _text: PhantomData,
         }
     }
 
     /// Invalidate the message's authentication status.
-    pub fn invalidate(self) -> Message<B, auth::Invalid> {
+    pub fn invalidate(self) -> Message<B, auth::Invalid, T> {
         Message {
             buffer: self.buffer,
             _auth: PhantomData,
+            _text: PhantomData,
+        }
+    }
+
+    /// Create a message from a buffer without validating its structure or authenticity.
+    ///
+    /// This function should be treated with the utmost caution.
+    pub const unsafe fn from_buffer_unchecked(buffer: B) -> Self {
+        Self {
+            buffer,
+            _auth: PhantomData,
+            _text: PhantomData,
         }
     }
 
     /// Deconstruct the message into its underlying buffer.
-    pub fn into_buffer(self) -> B {
+    pub fn to_buffer(self) -> B {
         self.buffer
     }
 
@@ -62,21 +93,35 @@ where
     pub fn as_buffer(&self) -> &B {
         &self.buffer
     }
+}
 
-    /// Create an owned message using a `Vec`.
-    pub fn to_owned(&self) -> Message<Vec<u8>, A> {
-        Message {
-            buffer: (*self.buffer).into(),
-            _auth: self._auth,
-        }
+impl<B, A> Message<B, A, text::Ciphertext>
+where
+    B: Deref<Target = [u8]>,
+    A: auth::Status,
+{
+    /// Get the ciphertext packet data.
+    pub fn claimed_packet_ciphertext(&self) -> &[u8] {
+        &self.buffer[PACKET_RANGE]
     }
 }
 
-impl<B> Message<B, auth::Unknown>
+impl<B, A> Message<B, A, text::Plaintext>
+where
+    B: Deref<Target = [u8]>,
+    A: auth::Status,
+{
+    /// Get the plaintext packet data.
+    pub fn claimed_packet_plaintext(&self) -> &[u8] {
+        &self.buffer[PACKET_RANGE]
+    }
+}
+
+impl<B> Message<B, auth::Unknown, text::Ciphertext>
 where
     B: Deref<Target = [u8]>,
 {
-    /// Create a message from a buffer.
+    /// Deserialize an encrypted message from a buffer.
     ///
     /// This validates the buffer's structure, but does not verify its signature.
     pub fn from_buffer(buffer: B) -> Result<Self, ParseError> {
@@ -84,36 +129,22 @@ where
             return Err(ParseError::BufferTooSmall);
         }
 
-        Ok(Self {
-            buffer,
-            _auth: PhantomData,
-        })
+        Ok(unsafe { Self::from_buffer_unchecked(buffer) })
     }
+}
 
-    /// Get a mutable reference to the message's underlying buffer.
-    ///
-    /// Used to construct messages in-place.
-    pub fn as_buffer_mut(&mut self) -> &mut B {
-        &mut self.buffer
-    }
-
-    /// Attest that the message is valid, without validating its signature.
-    ///
-    /// This function should be treated with the utmost caution.
-    pub fn attest(self) -> Message<B, auth::Valid> {
-        Message {
-            buffer: self.buffer,
-            _auth: PhantomData,
-        }
-    }
-
+impl<B, A> Message<B, A, text::Ciphertext>
+where
+    B: Deref<Target = [u8]>,
+    A: auth::Status,
+{
     /// Decrypt the message and validate its tag.
     ///
     /// The passed cipher must correspond to the sender's claimed ID.
     pub fn decrypt_in_place(
         mut self,
         cipher: &ChaCha20Poly1305,
-    ) -> Result<Message<B, auth::Valid>, DecryptionError<B>>
+    ) -> Result<Message<B, auth::Valid, text::Plaintext>, DecryptionError<B>>
     where
         B: DerefMut<Target = [u8]>,
     {
@@ -125,7 +156,11 @@ where
             packet,
             Tag::from_slice(&header[TAG_RANGE]),
         ) {
-            Ok(()) => Ok(self.attest()),
+            Ok(()) => Ok(Message {
+                buffer: self.buffer,
+                _auth: PhantomData,
+                _text: PhantomData,
+            }),
             Err(reason) => Err(DecryptionError {
                 message: self.invalidate(),
                 reason,
@@ -134,9 +169,10 @@ where
     }
 }
 
-impl<B> Message<B, auth::Valid>
+impl<B, T> Message<B, auth::Valid, T>
 where
     B: Deref<Target = [u8]>,
+    T: text::Kind,
 {
     /// The validated sequence number of this message.
     pub fn sequence_number(&self) -> u64 {
@@ -147,9 +183,24 @@ where
     pub fn sender(&self) -> [u8; 8] {
         self.claimed_sender()
     }
+}
 
-    /// The validated packet data.
-    pub fn packet(&self) -> &[u8] {
+impl<B> Message<B, auth::Valid, text::Ciphertext>
+where
+    B: Deref<Target = [u8]>,
+{
+    /// The validated ciphertext packet data.
+    pub fn packet_ciphertext(&self) -> &[u8] {
+        &self.buffer[PACKET_RANGE]
+    }
+}
+
+impl<B> Message<B, auth::Valid, text::Plaintext>
+where
+    B: Deref<Target = [u8]>,
+{
+    /// The validated plaintext packet data.
+    pub fn packet_plaintext(&self) -> &[u8] {
         &self.buffer[PACKET_RANGE]
     }
 
@@ -170,29 +221,64 @@ where
     }
 }
 
+impl Message<Vec<u8>, auth::Valid, text::Plaintext> {
+    /// Create a new message with an empty packet in a scratch buffer using the given metadata.
+    pub fn new_in(sequence_number: u64, sender: [u8; 8], mut buffer: Vec<u8>) -> Self {
+        buffer.clear();
+        buffer.extend_from_slice(&sequence_number.to_be_bytes());
+        buffer.extend_from_slice(&sender);
+        buffer.resize(32, 0);
+
+        unsafe { Self::from_buffer_unchecked(buffer) }
+    }
+
+    /// Create a new message with an empty packet backed by a [`Vec<u8>`] using the given metadata.
+    pub fn new(sequence_number: u64, sender: [u8; 8]) -> Self {
+        Self::new_in(
+            sequence_number,
+            sender,
+            Vec::with_capacity(PACKET_RANGE.start),
+        )
+    }
+
+    /// Overwrite the message's packet data from a reader.
+    pub fn overwrite_packet<R: io::Read>(&mut self, mut reader: R) -> io::Result<u64> {
+        self.buffer.truncate(PACKET_RANGE.start);
+        io::copy(&mut reader, &mut self.buffer)
+    }
+
+    /// Allocate space for a packet of the given size and return a mutable reference to it.
+    pub fn allocate_packet(&mut self, size: usize) -> &mut [u8] {
+        self.buffer.resize(PACKET_RANGE.start + size, 0);
+        &mut self.buffer[PACKET_RANGE]
+    }
+}
+
+impl<B, A, T> Debug for Message<B, A, T>
+where
+    B: Deref<Target = [u8]>,
+    A: auth::Status,
+    T: text::Kind,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Message {{ seq: {}, sender: {:#x}, packet: [..][{}], _auth: {}, _text: {} }}",
+            self.claimed_sequence_number(),
+            u64::from_be_bytes(self.claimed_sender()),
+            self.buffer[PACKET_RANGE].len(),
+            A::NAME,
+            T::NAME
+        )
+    }
+}
+
 // Ranges of the message buffer.
 const SEQUENCE_NUMBER_RANGE: Range<usize> = 0..8;
 const SENDER_RANGE: Range<usize> = 8..16;
 const NONCE_RANGE: Range<usize> = 0..12;
 const TAG_RANGE: Range<usize> = 16..32;
 const PACKET_RANGE: RangeFrom<usize> = 32..;
-
-impl<B, A> Debug for Message<B, A>
-where
-    B: Deref<Target = [u8]>,
-    A: auth::Status,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Message {{ seq: {}, sender: {:#x}, packet: [..][{}], _auth: {} }}",
-            self.claimed_sequence_number(),
-            u64::from_be_bytes(self.claimed_sender()),
-            self.buffer[PACKET_RANGE].len(),
-            A::NAME,
-        )
-    }
-}
 
 /// An error representing a failure to parse a packet message.
 #[derive(Debug, Error)]
@@ -205,8 +291,59 @@ pub enum ParseError {
 #[derive(Debug, Error)]
 #[error("failed to authenticate packet message: {message:?}")]
 pub struct DecryptionError<B: Deref<Target = [u8]>> {
-    pub message: Message<B, auth::Invalid>,
+    pub message: Message<B, auth::Invalid, text::Ciphertext>,
 
     #[source]
     pub reason: chacha20poly1305::Error,
+}
+
+#[cfg(test)]
+mod tests {
+    use chacha20poly1305::KeyInit;
+
+    use super::*;
+
+    const PACKET: &[u8] = b"hello world";
+    const ZERO_COPY_PACKET: &[u8] = b"hello zero-copy";
+
+    #[test]
+    fn construct_in_place() {
+        let mut message = Message::new(42, [1; 8]);
+
+        assert_eq!(message.claimed_sequence_number(), 42);
+        assert_eq!(message.claimed_sender(), [1; 8]);
+        assert_eq!(message.claimed_packet_plaintext(), &[]);
+
+        message.overwrite_packet(PACKET).unwrap();
+
+        assert_eq!(message.claimed_packet_plaintext(), b"hello world");
+
+        message
+            .allocate_packet(ZERO_COPY_PACKET.len())
+            .copy_from_slice(ZERO_COPY_PACKET);
+
+        assert_eq!(message.claimed_packet_plaintext(), b"hello zero-copy");
+    }
+
+    #[test]
+    fn encrypt_and_decrypt_in_place() {
+        let mut message = Message::new(1729, [42; 8]);
+
+        message.overwrite_packet(PACKET).unwrap();
+
+        let cipher = ChaCha20Poly1305::new((&[42; 32]).into());
+
+        let ciphertext_raw = message.encrypt_in_place(&cipher);
+        let ciphertext_message = Message::from_buffer(ciphertext_raw).unwrap();
+
+        assert_eq!(ciphertext_message.claimed_sequence_number(), 1729);
+        assert_eq!(ciphertext_message.claimed_sender(), [42; 8]);
+        assert_ne!(ciphertext_message.claimed_packet_ciphertext(), PACKET);
+
+        let plaintext_message = ciphertext_message.decrypt_in_place(&cipher).unwrap();
+
+        assert_eq!(plaintext_message.claimed_sequence_number(), 1729);
+        assert_eq!(plaintext_message.claimed_sender(), [42; 8]);
+        assert_eq!(plaintext_message.claimed_packet_plaintext(), PACKET);
+    }
 }

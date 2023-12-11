@@ -4,7 +4,7 @@ use ed25519_dalek::Signer;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::auth;
+use crate::marker::auth;
 
 /// A parsed control message used to establish and maintain a connection.
 #[derive(Clone, PartialEq, Eq)]
