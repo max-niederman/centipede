@@ -1,6 +1,6 @@
 use std::{
     fmt::Debug,
-    io::{self, Read},
+    io,
     marker::PhantomData,
     ops::{Deref, DerefMut, Range, RangeFrom},
 };
@@ -146,7 +146,7 @@ where
         cipher: &ChaCha20Poly1305,
     ) -> Result<Message<B, auth::Valid, text::Plaintext>, DecryptionError<B>>
     where
-        B: DerefMut<Target = [u8]>,
+        B: DerefMut,
     {
         let (header, packet) = self.buffer.split_at_mut(32);
 
@@ -207,7 +207,7 @@ where
     /// Encrypt the message, fill in its tag, and return its buffer.
     pub fn encrypt_in_place(mut self, cipher: &ChaCha20Poly1305) -> B
     where
-        B: DerefMut<Target = [u8]>,
+        B: DerefMut,
     {
         let (header, packet) = self.buffer.split_at_mut(32);
 
@@ -285,6 +285,8 @@ const PACKET_RANGE: RangeFrom<usize> = 32..;
 pub enum ParseError {
     #[error("attempted to parse a packet message from too small a buffer")]
     BufferTooSmall,
+    #[error("attempted to parse a packet message with an invalid tag {0:x}")]
+    InvalidTag(u64),
 }
 
 /// An error representing a failure to authenticate a packet message.
@@ -300,6 +302,8 @@ pub struct DecryptionError<B: Deref<Target = [u8]>> {
 #[cfg(test)]
 mod tests {
     use chacha20poly1305::KeyInit;
+
+    use crate::{discriminate, MessageDiscriminant};
 
     use super::*;
 
@@ -345,5 +349,14 @@ mod tests {
         assert_eq!(plaintext_message.claimed_sequence_number(), 1729);
         assert_eq!(plaintext_message.claimed_sender(), [42; 8]);
         assert_eq!(plaintext_message.claimed_packet_plaintext(), PACKET);
+    }
+
+    #[test]
+    fn discriminate_packet() {
+        let message = Message::new(42, [1; 8]);
+        let cipher = ChaCha20Poly1305::new((&[42; 32]).into());
+        let buffer = message.encrypt_in_place(&cipher);
+
+        assert_eq!(discriminate(buffer).unwrap(), MessageDiscriminant::Packet);
     }
 }

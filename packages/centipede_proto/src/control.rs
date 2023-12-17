@@ -1,4 +1,4 @@
-use std::{fmt::Debug, marker::PhantomData, net::SocketAddr};
+use std::{fmt::Debug, marker::PhantomData, net::SocketAddr, ops::Deref};
 
 use ed25519_dalek::Signer;
 use serde::{Deserialize, Serialize};
@@ -120,6 +120,8 @@ impl Message<auth::Valid> {
 
         let mut buffer = vec![0; size];
 
+        buffer[TAG_RANGE].copy_from_slice(&CONTROL_TAG.to_be_bytes());
+
         buffer[SENDER_KEY_RANGE].copy_from_slice(signing_key.verifying_key().as_bytes());
 
         buffer[SEQUENCE_NUMBER_RANGE].copy_from_slice(&sequence_number.to_be_bytes());
@@ -142,10 +144,6 @@ impl Message<auth::Valid> {
 
     /// Parse and validate a control message.
     pub fn parse_and_validate(buffer: &[u8]) -> Result<Self, ParseValidateError> {
-        if buffer.len() < PAYLOAD_RANGE.start {
-            return Err(ParseError::BufferTooSmall.into());
-        }
-
         let sender =
             ed25519_dalek::VerifyingKey::from_bytes(&buffer[SENDER_KEY_RANGE].try_into().unwrap())
                 .map_err(ParseError::PublicKey)?;
@@ -203,13 +201,41 @@ impl<A: auth::Status> Debug for Message<A> {
     }
 }
 
+/// A buffer to be deserialized and validated lazily.
+pub struct LazyMessage<B>
+where
+    B: Deref<Target = [u8]>,
+{
+    /// The buffer to be deserialized and validated.
+    buffer: B,
+}
+
+impl<B> LazyMessage<B>
+where
+    B: Deref<Target = [u8]>,
+{
+    /// Create a new lazy message from a buffer.
+    pub fn from_buffer(buffer: B) -> Self {
+        Self { buffer }
+    }
+
+    /// Deserialize and validate the message.
+    pub fn realize(self) -> Result<Message<auth::Valid>, ParseValidateError> {
+        Message::parse_and_validate(&self.buffer)
+    }
+}
+
 // Ranges of the message buffer.
-const SENDER_KEY_RANGE: std::ops::Range<usize> = 0..32;
-const SIGNATURE_RANGE: std::ops::Range<usize> = 32..96;
-const SEQUENCE_NUMBER_RANGE: std::ops::Range<usize> = 96..104;
-const KIND_RANGE: std::ops::Range<usize> = 104..108;
-const PAYLOAD_RANGE: std::ops::RangeFrom<usize> = 108..;
-const SIGNED_RANGE: std::ops::RangeFrom<usize> = 96..;
+const TAG_RANGE: std::ops::Range<usize> = 0..8;
+const SENDER_KEY_RANGE: std::ops::Range<usize> = 8..40;
+const SIGNATURE_RANGE: std::ops::Range<usize> = 40..104;
+const SEQUENCE_NUMBER_RANGE: std::ops::Range<usize> = 104..112;
+const KIND_RANGE: std::ops::Range<usize> = 112..116;
+const PAYLOAD_RANGE: std::ops::RangeFrom<usize> = 116..;
+const SIGNED_RANGE: std::ops::RangeFrom<usize> = 104..;
+
+/// The tag of every control message.
+pub(crate) const CONTROL_TAG: u64 = 1 << 63;
 
 // Kinds of control messages.
 const KIND_PAYLOAD: u32 = 0;
@@ -254,6 +280,7 @@ pub struct ValidateError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{discriminate, MessageDiscriminant};
 
     #[test]
     fn serialize_deserialize_payload() {
@@ -322,5 +349,23 @@ mod tests {
             Err(e) => panic!("unexpected error: {}", e),
             Ok(_) => panic!("unexpected success"),
         }
+    }
+
+    #[test]
+    fn discriminate_control() {
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&[1; 32]);
+
+        let sequence_number = 42;
+        let payload = Payload::Initiate {
+            ecdh_public_key: x25519_dalek::PublicKey::from([0; 32]),
+        };
+
+        let buffer = Message::<auth::Valid>::serialize(
+            &signing_key,
+            sequence_number,
+            MessageKind::Payload(payload.clone()),
+        );
+
+        assert_eq!(discriminate(buffer).unwrap(), MessageDiscriminant::Control);
     }
 }
