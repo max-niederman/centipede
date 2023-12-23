@@ -55,6 +55,10 @@ dependencies = [
 [[package]]
 name = "centipede_router"
 version = "0.1.0"
+dependencies = [
+ "centipede_proto",
+ "chacha20poly1305",
+]
 
 [[package]]
 name = "centipede_router_tun"
