@@ -84,6 +84,15 @@ where
         }
     }
 
+    /// Interpret the message buffer as a byte slice.
+    pub fn as_ref(&self) -> Message<&'_ [u8], A, T> {
+        Message {
+            buffer: &self.buffer,
+            _auth: PhantomData,
+            _text: PhantomData,
+        }
+    }
+
     /// Deconstruct the message into its underlying buffer.
     pub fn to_buffer(self) -> B {
         self.buffer
@@ -205,7 +214,10 @@ where
     }
 
     /// Encrypt the message, fill in its tag, and return its buffer.
-    pub fn encrypt_in_place(mut self, cipher: &ChaCha20Poly1305) -> B
+    pub fn encrypt_in_place(
+        mut self,
+        cipher: &ChaCha20Poly1305,
+    ) -> Message<B, auth::Valid, text::Ciphertext>
     where
         B: DerefMut,
     {
@@ -217,11 +229,20 @@ where
 
         header[TAG_RANGE].copy_from_slice(&tag);
 
-        self.buffer
+        Message {
+            buffer: self.buffer,
+            _auth: PhantomData,
+            _text: PhantomData,
+        }
     }
 }
 
 impl Message<Vec<u8>, auth::Valid, text::Plaintext> {
+    /// Measure the buffer size needed to hold a message with the given packet size.
+    pub const fn measure(packet_size: usize) -> usize {
+        PACKET_RANGE.start + packet_size
+    }
+
     /// Create a new message with an empty packet in a scratch buffer using the given metadata.
     pub fn new_in(sequence_number: u64, sender: [u8; 8], mut buffer: Vec<u8>) -> Self {
         buffer.clear();
@@ -232,19 +253,33 @@ impl Message<Vec<u8>, auth::Valid, text::Plaintext> {
         unsafe { Self::from_buffer_unchecked(buffer) }
     }
 
-    /// Create a new message with an empty packet backed by a [`Vec<u8>`] using the given metadata.
-    pub fn new(sequence_number: u64, sender: [u8; 8]) -> Self {
+    /// Create a new message backed by a [`Vec<u8>`] with capacity for the given packet size using the given metadata.
+    pub fn new_with_capacity(sequence_number: u64, sender: [u8; 8], packet_size: usize) -> Self {
         Self::new_in(
             sequence_number,
             sender,
-            Vec::with_capacity(PACKET_RANGE.start),
+            Vec::with_capacity(PACKET_RANGE.start + packet_size),
         )
     }
 
-    /// Overwrite the message's packet data from a reader.
-    pub fn overwrite_packet<R: io::Read>(&mut self, mut reader: R) -> io::Result<u64> {
+    /// Create a new message backed by a [`Vec<u8>`] using the given metadata.
+    pub fn new(sequence_number: u64, sender: [u8; 8]) -> Self {
+        Self::new_with_capacity(sequence_number, sender, 0)
+    }
+
+    /// Overwrite the message's packet data from an iterator.
+    pub fn overwrite_packet(&mut self, iter: impl IntoIterator<Item = u8>) {
+        let iter = iter.into_iter();
+
+        self.reserve_packet(iter.size_hint().0);
+
         self.buffer.truncate(PACKET_RANGE.start);
-        io::copy(&mut reader, &mut self.buffer)
+        self.buffer.extend(iter);
+    }
+
+    /// Reserve space for a packet of the given size.
+    pub fn reserve_packet(&mut self, size: usize) {
+        self.buffer.reserve(PACKET_RANGE.start + size);
     }
 
     /// Allocate space for a packet of the given size and return a mutable reference to it.
@@ -279,6 +314,23 @@ const SENDER_RANGE: Range<usize> = 8..16;
 const NONCE_RANGE: Range<usize> = 0..12;
 const TAG_RANGE: Range<usize> = 16..32;
 const PACKET_RANGE: RangeFrom<usize> = 32..;
+
+/// A mutable reference to a [`Vec<u8>`] that can be used as a packet message buffer.
+pub struct ByteVecMut<'v>(pub &'v mut Vec<u8>);
+
+impl<'v> Deref for ByteVecMut<'v> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+impl<'v> DerefMut for ByteVecMut<'v> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0
+    }
+}
 
 /// An error representing a failure to parse a packet message.
 #[derive(Debug, Error)]
@@ -318,7 +370,7 @@ mod tests {
         assert_eq!(message.claimed_sender(), [1; 8]);
         assert_eq!(message.claimed_packet_plaintext(), &[]);
 
-        message.overwrite_packet(PACKET).unwrap();
+        message.overwrite_packet(PACKET.iter().copied());
 
         assert_eq!(message.claimed_packet_plaintext(), b"hello world");
 
@@ -333,12 +385,11 @@ mod tests {
     fn encrypt_and_decrypt_in_place() {
         let mut message = Message::new(1729, [42; 8]);
 
-        message.overwrite_packet(PACKET).unwrap();
+        message.overwrite_packet(PACKET.iter().copied());
 
         let cipher = ChaCha20Poly1305::new((&[42; 32]).into());
 
-        let ciphertext_raw = message.encrypt_in_place(&cipher);
-        let ciphertext_message = Message::from_buffer(ciphertext_raw).unwrap();
+        let ciphertext_message = message.encrypt_in_place(&cipher);
 
         assert_eq!(ciphertext_message.claimed_sequence_number(), 1729);
         assert_eq!(ciphertext_message.claimed_sender(), [42; 8]);
@@ -353,10 +404,13 @@ mod tests {
 
     #[test]
     fn discriminate_packet() {
-        let message = Message::new(42, [1; 8]);
+        let plaintext = Message::new(42, [1; 8]);
         let cipher = ChaCha20Poly1305::new((&[42; 32]).into());
-        let buffer = message.encrypt_in_place(&cipher);
+        let ciphertext = plaintext.encrypt_in_place(&cipher);
 
-        assert_eq!(discriminate(buffer).unwrap(), MessageDiscriminant::Packet);
+        assert_eq!(
+            discriminate(ciphertext.as_buffer().as_slice()).unwrap(),
+            MessageDiscriminant::Packet
+        );
     }
 }
