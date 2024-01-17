@@ -1,6 +1,5 @@
 use std::{
     fmt::Debug,
-    io,
     marker::PhantomData,
     ops::{Deref, DerefMut, Range, RangeFrom},
 };
@@ -55,6 +54,8 @@ where
 
     /// Attest that the message is valid, without validating its signature.
     ///
+    /// # Safety
+    /// The packet must satisfy the invariants of the authentication status and text kind.
     /// This function should be treated with the utmost caution.
     pub unsafe fn attest(self) -> Message<B, auth::Valid, T> {
         Message {
@@ -75,6 +76,8 @@ where
 
     /// Create a message from a buffer without validating its structure or authenticity.
     ///
+    /// # Safety
+    /// The buffer must satisfy the invariants of the authentication status and text kind.
     /// This function should be treated with the utmost caution.
     pub const unsafe fn from_buffer_unchecked(buffer: B) -> Self {
         Self {

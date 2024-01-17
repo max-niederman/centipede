@@ -114,7 +114,7 @@ mod tests {
         Router::new([0; 8]);
     }
 
-    fn state<'c>(controller: &Controller) -> Arc<ConfiguredRouter> {
+    fn state(controller: &Controller) -> Arc<ConfiguredRouter> {
         controller.router.state.load_full()
     }
 

@@ -175,13 +175,13 @@ impl Message<auth::Valid> {
                 _auth: PhantomData::<auth::Valid>,
             }),
             Err(e) => Err(ValidateError {
-                message: Message {
+                message: Box::new(Message {
                     sender,
                     signature,
                     sequence_number,
                     content,
                     _auth: PhantomData::<auth::Invalid>,
-                },
+                }),
                 reason: e,
             }
             .into()),
@@ -271,7 +271,7 @@ pub enum ParseError {
 #[derive(Debug, Error)]
 #[error("failed to validate control message: {message:?}")]
 pub struct ValidateError {
-    pub message: Message<auth::Invalid>,
+    pub message: Box<Message<auth::Invalid>>,
 
     #[source]
     pub reason: ed25519_dalek::SignatureError,
