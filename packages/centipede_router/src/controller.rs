@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn construct() {
-        Router::new([0; 8], vec![]);
+        Router::new([0; 8]);
     }
 
     fn state<'c>(controller: &Controller) -> Arc<ConfiguredRouter> {
@@ -120,7 +120,7 @@ mod tests {
 
     #[test]
     fn crud_receive_tunnel() {
-        let mut router = Router::new([0; 8], vec![]);
+        let mut router = Router::new([0; 8]);
         let (mut controller, _) = router.handles(0);
 
         controller.upsert_receive_tunnel([1; 8], ChaCha20Poly1305::new((&[0; 32]).into()));
@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn crud_send_tunnel() {
-        let mut router = Router::new([0; 8], vec![]);
+        let mut router = Router::new([0; 8]);
         let (mut controller, _) = router.handles(0);
 
         let link = Link {
@@ -158,7 +158,7 @@ mod tests {
 
     #[test]
     fn receive_updates_preserve_state() {
-        let mut router = Router::new([0; 8], vec![]);
+        let mut router = Router::new([0; 8]);
         let (mut controller, _) = router.handles(0);
 
         controller.upsert_receive_tunnel([1; 8], ChaCha20Poly1305::new((&[0; 32]).into()));
@@ -175,7 +175,7 @@ mod tests {
 
     #[test]
     fn send_updates_preserve_state() {
-        let mut router = Router::new([0; 8], vec![]);
+        let mut router = Router::new([0; 8]);
         let (mut controller, _) = router.handles(0);
 
         controller.upsert_send_tunnel([1; 8], ChaCha20Poly1305::new((&[0; 32]).into()), vec![]);

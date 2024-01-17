@@ -68,6 +68,10 @@ impl<B: Deref<Target = [u8]>> ReceivePacket<B> {
 }
 
 /// A coroutine yielding packets to send.
+///
+/// Once the `coroutines` feature is stable,
+/// this will be replaced with a coroutine literal.
+#[must_use = "outgoing packet coroutine must be resumed"]
 pub struct HandleOutgoing<'p> {
     /// Plaintext of the outgoing packet being handled.
     packet_plaintext: &'p [u8],
@@ -137,8 +141,8 @@ impl<'p> HandleOutgoing<'p> {
                 Some(SendPacket { link, message })
             }
             None => {
-                self.tunnels.next()?;
-                self.remaining_links = self.tunnels.peek().unwrap().links.iter();
+                self.remaining_links = self.tunnels.peek()?.links.iter();
+                self.tunnels.next().unwrap();
                 None
             }
         }
@@ -148,7 +152,7 @@ impl<'p> HandleOutgoing<'p> {
 /// The obligation to
 /// send a packet from the system's networking stack
 /// to another peer on the Centipede network.
-#[must_use]
+#[must_use = "send packet obligation must be fulfilled"]
 pub struct SendPacket {
     /// The link to send the packet over.
     link: Link,

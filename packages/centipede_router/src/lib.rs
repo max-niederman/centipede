@@ -31,9 +31,6 @@ struct ConfiguredRouter {
     /// Our local peer identifier.
     local_id: PeerId,
 
-    /// Local addresses on which to receive messages.
-    recv_addrs: Vec<SocketAddr>,
-
     /// Set of receiving tunnels, by sender identifier.
     recv_tunnels: HashMap<PeerId, RecvTunnel>,
 
@@ -68,22 +65,21 @@ struct SendTunnel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Link {
     /// The local address.
-    local: SocketAddr,
+    pub local: SocketAddr,
 
     /// The remote address.
-    remote: SocketAddr,
+    pub remote: SocketAddr,
 }
 
 pub type PeerId = [u8; 8];
 
 impl Router {
     /// Create a new router.
-    pub fn new(peer_id: PeerId, recv_addrs: Vec<SocketAddr>) -> Self {
+    pub fn new(peer_id: PeerId) -> Self {
         Self {
             state: ArcSwap::from_pointee(ConfiguredRouter {
                 generation: 0,
                 local_id: peer_id,
-                recv_addrs,
                 recv_tunnels: HashMap::new(),
                 send_tunnels: HashMap::new(),
             }),
