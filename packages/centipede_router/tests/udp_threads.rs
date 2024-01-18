@@ -53,12 +53,10 @@ fn half_duplex_single_message() {
             id: [0; 8],
             addr_count: 1,
             entrypoint: Box::new(|mut ctx: PeerCtx<'_>| {
-                ctx.controller.upsert_send_tunnel(
-                    [1; 8],
-                    dummy_cipher(),
-                    ctx.possible_links_to([1; 8]),
-                );
-
+                let links = ctx.possible_links_to([1; 8]);
+                ctx.controller.transaction(move |trans| {
+                    trans.upsert_send_tunnel([1; 8], dummy_cipher(), links.clone())
+                });
                 let mut obligations = ctx.worker.handle_outgoing(PACKET);
                 let mut scratch = Vec::new();
 
@@ -82,7 +80,8 @@ fn half_duplex_single_message() {
             id: [1; 8],
             addr_count: 1,
             entrypoint: Box::new(|mut ctx: PeerCtx<'_>| {
-                ctx.controller.upsert_receive_tunnel([0; 8], dummy_cipher());
+                ctx.controller
+                    .transaction(|trans| trans.upsert_receive_tunnel([0; 8], dummy_cipher()));
 
                 let packets = ctx.receive_block();
                 assert_eq!(packets.len(), 1, "received wrong number of packets");
@@ -148,7 +147,8 @@ impl<'r> PeerCtx<'r> {
                 let sockets = sockets.remove(&spec.id).unwrap();
 
                 s.spawn(move || {
-                    let mut router = Router::new(spec.id);
+                    let mut router =
+                        Router::new(spec.id, peer_addrs.get(&spec.id).unwrap().clone());
                     let (controller, workers) = router.handles(1);
                     let worker = workers.into_iter().next().unwrap();
 
