@@ -6,3 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+hypertube = "0.2.2"
+mio = { version = "0.8.10", features = ["os-poll"] }
+socket2 = { version = "0.5.5", features = ["all"] }
+thiserror = "1.0.56"
