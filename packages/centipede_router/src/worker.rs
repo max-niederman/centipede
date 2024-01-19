@@ -16,11 +16,12 @@ use std::{
     sync::{atomic::Ordering, Arc},
 };
 
-pub struct Worker<'r> {
+/// A handle to the router for the use of a worker.
+pub struct WorkerHandle<'r> {
     router: &'r Router,
 }
 
-impl<'r> Worker<'r> {
+impl<'r> WorkerHandle<'r> {
     /// Create a new worker.
     pub(crate) fn new(router: &'r Router) -> Self {
         Self { router }

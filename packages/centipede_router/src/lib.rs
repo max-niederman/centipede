@@ -12,9 +12,9 @@ use std::{
 
 use arc_swap::ArcSwap;
 use chacha20poly1305::ChaCha20Poly1305;
-use controller::Controller;
+use controller::ControllerHandle;
 use packet_memory::PacketMemory;
-use worker::Worker;
+use worker::WorkerHandle;
 
 /// The shared state of a Centipede tunnel router.
 pub struct Router {
@@ -91,11 +91,11 @@ impl Router {
     }
 
     /// Get one controller and N worker handles to the router.
-    pub fn handles(&mut self, n: usize) -> (Controller<'_>, Vec<Worker<'_>>) {
+    pub fn handles(&mut self, n: usize) -> (ControllerHandle<'_>, Vec<WorkerHandle<'_>>) {
         let this = &*self;
 
-        let controller = Controller::new(this);
-        let workers = iter::repeat_with(|| Worker::new(this)).take(n).collect();
+        let controller = ControllerHandle::new(this);
+        let workers = iter::repeat_with(|| WorkerHandle::new(this)).take(n).collect();
 
         (controller, workers)
     }

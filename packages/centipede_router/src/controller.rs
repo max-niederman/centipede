@@ -9,11 +9,12 @@ use crate::{
     packet_memory::PacketMemory, ConfiguredRouter, Link, PeerId, RecvTunnel, Router, SendTunnel,
 };
 
-pub struct Controller<'r> {
+/// A handle to the router for reconfiguration.
+pub struct ControllerHandle<'r> {
     router: &'r Router,
 }
 
-impl<'r> Controller<'r> {
+impl<'r> ControllerHandle<'r> {
     /// Create a new controller, given a router.
     ///
     /// It is a logic error to create a controller for a router when there is already a controller for that router.
@@ -112,7 +113,7 @@ mod tests {
         Router::new([0; 8], vec![]);
     }
 
-    fn state(controller: &Controller) -> Arc<ConfiguredRouter> {
+    fn state(controller: &ControllerHandle) -> Arc<ConfiguredRouter> {
         controller.router.state.load_full()
     }
 

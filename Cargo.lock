@@ -68,9 +68,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "centipede_router_tun"
+name = "centipede_worker"
 version = "0.1.0"
 dependencies = [
+ "centipede_router",
  "hypertube",
  "mio",
  "socket2",

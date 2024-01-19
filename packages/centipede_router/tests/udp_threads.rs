@@ -11,8 +11,8 @@ use centipede_proto::{
     PacketMessage,
 };
 use centipede_router::{
-    controller::Controller,
-    worker::{SendPacket, Worker},
+    controller::ControllerHandle,
+    worker::{SendPacket, WorkerHandle},
     Link, PeerId, Router,
 };
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
@@ -100,8 +100,8 @@ fn half_duplex_single_message() {
 
 /// The context in which a peer test program runs.
 struct PeerCtx<'r> {
-    controller: Controller<'r>,
-    worker: Worker<'r>,
+    controller: ControllerHandle<'r>,
+    worker: WorkerHandle<'r>,
 
     sockets: Vec<UdpSocket>,
     peers: HashMap<PeerId, Vec<SocketAddr>>,
