@@ -29,7 +29,7 @@ impl Sockets {
     pub fn update(
         &mut self,
         addrs: impl Iterator<Item = SocketAddr>,
-    ) -> Result<UpdateStats, UpdateError> {
+    ) -> Result<UpdateStats, SocketsError> {
         let mut stats = UpdateStats {
             closed: 0,
             kept: 0,
@@ -49,11 +49,11 @@ impl Sockets {
                     stats.kept += 1;
                     old_arena[index]
                         .try_clone()
-                        .map_err(UpdateError::DuplicateSocketFd)?
+                        .map_err(SocketsError::DuplicateSocketFd)?
                 }
                 None => {
                     stats.opened += 1;
-                    bind_socket(addr).map_err(UpdateError::BindSocket)?
+                    bind_socket(addr).map_err(SocketsError::BindSocket)?
                 }
             };
 
@@ -68,14 +68,25 @@ impl Sockets {
         Ok(stats)
     }
 
-    /// Resolve a local address to a socket.
-    pub fn resolve_local_addr(&self, addr: SocketAddr) -> Option<&Socket> {
-        let index = *self.by_local_addr.get(&addr)?;
-        Some(&self.arena[index])
+    /// Resolve or bind a socket to a local address.
+    pub fn resolve_or_bind_local_addr(
+        &mut self,
+        addr: SocketAddr,
+    ) -> Result<&Socket, SocketsError> {
+        let index = match self.by_local_addr.get(&addr) {
+            Some(&index) => index,
+            None => {
+                let index = self.arena.len();
+                self.arena
+                    .push(bind_socket(addr).map_err(SocketsError::BindSocket)?);
+                index
+            }
+        };
+        Ok(&self.arena[index])
     }
 
     /// Resolve an index to a socket.
-    pub fn resolve_index(&self, index: usize) -> Option<&Socket> {
+    pub fn resolve_index(&mut self, index: usize) -> Option<&Socket> {
         self.arena.get(index)
     }
 }
@@ -108,7 +119,7 @@ pub struct UpdateStats {
 
 #[derive(Debug, Error)]
 #[error("failed to update sockets")]
-pub enum UpdateError {
+pub enum SocketsError {
     #[error("failed to bind socket")]
     BindSocket(#[source] std::io::Error),
 
@@ -235,7 +246,7 @@ mod tests {
         );
 
         let socket = sockets
-            .resolve_local_addr(SocketAddr::from(([127, 0, 0, 1], PORT)))
+            .resolve_or_bind_local_addr(SocketAddr::from(([127, 0, 0, 1], PORT)))
             .unwrap();
         assert_eq!(
             socket.local_addr().unwrap(),
