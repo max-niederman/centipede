@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     net::SocketAddr,
     sync::{atomic::AtomicU64, Arc},
 };
@@ -46,8 +47,12 @@ pub struct Transaction {
 
 impl Transaction {
     /// Update the addresses on which to listen.
-    pub fn set_recv_addrs(&mut self, addrs: Vec<SocketAddr>) {
-        self.config.recv_addrs = addrs;
+    ///
+    /// # Note
+    /// This function deduplicates the given addresses by their hashes.
+    pub fn set_recv_addrs(&mut self, addrs: impl IntoIterator<Item = SocketAddr>) {
+        let set: HashSet<_> = addrs.into_iter().collect();
+        self.config.recv_addrs = set.into_iter().collect();
     }
 
     /// Insert or update a receive tunnel.
@@ -126,7 +131,7 @@ mod tests {
         let prev_generation = state(&controller).generation;
 
         controller.transaction(|trans| {
-            trans.set_recv_addrs(vec![SocketAddr::from(([0, 0, 0, 0], 0))]);
+            trans.set_recv_addrs([SocketAddr::from(([0, 0, 0, 0], 0))]);
         });
 
         assert_eq!(

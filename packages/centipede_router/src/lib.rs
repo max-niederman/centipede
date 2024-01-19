@@ -32,6 +32,8 @@ struct ConfiguredRouter {
     local_id: PeerId,
 
     /// Addresses on which to listen for incoming packets.
+    /// 
+    /// This list should not contain duplicates.
     recv_addrs: Vec<SocketAddr>,
 
     /// Set of receiving tunnels, by sender identifier.

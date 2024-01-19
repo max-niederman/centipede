@@ -1,3 +1,4 @@
+use arc_swap::access::Access;
 use centipede_proto::{
     marker::{auth, text},
     PacketMessage,
@@ -10,6 +11,7 @@ use crate::{
 use std::{
     collections::hash_map,
     iter, mem,
+    net::SocketAddr,
     ops::{Deref, DerefMut},
     pin::Pin,
     slice,
@@ -18,13 +20,34 @@ use std::{
 
 /// A handle to the router for the use of a worker.
 pub struct WorkerHandle<'r> {
+    /// The underlying router.
     router: &'r Router,
+
+    /// The last observed configuration generation, if any.
+    last_config_generation: Option<u64>,
 }
 
 impl<'r> WorkerHandle<'r> {
     /// Create a new worker.
     pub(crate) fn new(router: &'r Router) -> Self {
-        Self { router }
+        Self {
+            router,
+            last_config_generation: None,
+        }
+    }
+
+    /// Check if the configuration has changed.
+    pub fn check_config(&mut self) -> Option<ConfigChanged> {
+        let config = self.router.state.load();
+
+        if self.last_config_generation != Some(config.generation) {
+            self.last_config_generation = Some(config.generation);
+            Some(ConfigChanged {
+                router_state: self.router.state.load(),
+            })
+        } else {
+            None
+        }
     }
 
     /// Handle an incoming packet message from the Centipede network.
@@ -52,6 +75,35 @@ impl<'r> WorkerHandle<'r> {
         HandleOutgoing::start(self.router, packet)
     }
 }
+
+/// Notification to the worker of a configuration change.
+///
+/// Note that this does not include the entire configuration,
+/// and the [`WorkerHandle`] will still reflect changes made
+/// after a notification but before the next.
+pub struct ConfigChanged {
+    router_state: arc_swap::Guard<Arc<ConfiguredRouter>>,
+}
+
+impl ConfigChanged {
+    /// Addresses on which the worker should listen for incoming packets.
+    /// 
+    /// This iterator will not yield duplicates.
+    pub fn recv_addrs(&self) -> impl Iterator<Item = SocketAddr> + '_ {
+        self.router_state.recv_addrs.iter().copied()
+    }
+
+    /// Addresses from which the worker may be expected to send outgoing packets.
+    /// 
+    /// This iterator may yield duplicates.
+    pub fn send_addrs(&self) -> impl Iterator<Item = SocketAddr> + '_ {
+        self.router_state
+            .send_tunnels
+            .values()
+            .flat_map(|tunnel| tunnel.links.iter().map(|link| link.local))
+    }
+}
+
 /// The obligation to
 /// receive a packet from the Centipede network
 /// and hand it off to the system's networking stack.
