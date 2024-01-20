@@ -15,7 +15,9 @@ use centipede_router::{
     worker::{SendPacket, WorkerHandle},
     Link, PeerId, Router,
 };
-use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
+
+mod common;
+use common::*;
 
 /// Test a network with zero peers.
 ///
@@ -149,8 +151,7 @@ impl<'r> PeerCtx<'r> {
                 s.spawn(move || {
                     let mut router =
                         Router::new(spec.id, peer_addrs.get(&spec.id).unwrap().clone());
-                    let (controller, workers) = router.handles(1);
-                    let worker = workers.into_iter().next().unwrap();
+                    let (controller, worker) = get_single_handles(&mut router);
 
                     (spec.entrypoint)(PeerCtx {
                         controller,
@@ -218,8 +219,4 @@ impl<'r> PeerCtx<'r> {
 
         obligation.fulfill()
     }
-}
-
-fn dummy_cipher() -> ChaCha20Poly1305 {
-    ChaCha20Poly1305::new(&[0; 32].into())
 }
