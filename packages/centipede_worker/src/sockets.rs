@@ -51,10 +51,15 @@ impl Sockets {
                         .try_clone()
                         .map_err(SocketsError::DuplicateSocketFd)?
                 }
-                None => {
-                    stats.opened += 1;
-                    bind_socket(addr).map_err(SocketsError::BindSocket)?
-                }
+                None => match self.by_local_addr.get(&addr) {
+                    Some(&index) => self.arena[index]
+                        .try_clone()
+                        .map_err(SocketsError::DuplicateSocketFd)?,
+                    None => {
+                        stats.opened += 1;
+                        bind_socket(addr).map_err(SocketsError::BindSocket)?
+                    }
+                },
             };
 
             let index = self.arena.len();
@@ -72,7 +77,7 @@ impl Sockets {
     pub fn resolve_or_bind_local_addr(
         &mut self,
         addr: SocketAddr,
-    ) -> Result<&Socket, SocketsError> {
+    ) -> Result<&mut Socket, SocketsError> {
         let index = match self.by_local_addr.get(&addr) {
             Some(&index) => index,
             None => {
@@ -82,12 +87,12 @@ impl Sockets {
                 index
             }
         };
-        Ok(&self.arena[index])
+        Ok(&mut self.arena[index])
     }
 
     /// Resolve an index to a socket.
-    pub fn resolve_index(&mut self, index: usize) -> Option<&Socket> {
-        self.arena.get(index)
+    pub fn resolve_index(&mut self, index: usize) -> Option<&mut Socket> {
+        self.arena.get_mut(index)
     }
 }
 

@@ -71,8 +71,10 @@ dependencies = [
 name = "centipede_worker"
 version = "0.1.0"
 dependencies = [
+ "centipede_proto",
  "centipede_router",
  "hypertube",
+ "log",
  "mio",
  "socket2",
  "thiserror",

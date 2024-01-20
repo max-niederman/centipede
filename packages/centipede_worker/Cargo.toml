@@ -6,8 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+centipede_proto = { version = "0.1.0", path = "../centipede_proto" }
 centipede_router = { version = "0.1.0", path = "../centipede_router" }
 hypertube = "0.2.2"
-mio = { version = "0.8.10", features = ["os-poll"] }
+log = "0.4.20"
+mio = { version = "0.8.10", features = ["os-poll", "os-ext"] }
 socket2 = { version = "0.5.5", features = ["all"] }
 thiserror = "1.0.56"

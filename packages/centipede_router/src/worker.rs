@@ -1,4 +1,3 @@
-use arc_swap::access::Access;
 use centipede_proto::{
     marker::{auth, text},
     PacketMessage,
