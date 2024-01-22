@@ -4,7 +4,7 @@ extern crate test;
 use std::{mem, net::UdpSocket, thread};
 
 use centipede_proto::PacketMessage;
-use centipede_router::{Link, Router};
+use centipede_router::{config, Link, Router};
 
 mod common;
 use common::*;
@@ -39,12 +39,20 @@ fn half_duplex_iter(packet_size: usize, num_packets: usize) {
 
         // receiver
         s.spawn(move || {
-            let mut router = Router::new([1; 8], vec![recv_addr]);
-            let (mut controller, mut worker) = get_single_handles(&mut router);
-
-            controller.transaction(|trans| {
-                trans.upsert_receive_tunnel([0; 8], dummy_cipher());
+            let router = Router::new(&config::Router {
+                local_id: [1; 8],
+                recv_addrs: [recv_addr].into(),
+                recv_tunnels: [(
+                    [0; 8],
+                    config::RecvTunnel {
+                        cipher: dummy_cipher(),
+                    },
+                )]
+                .into_iter()
+                .collect(),
+                send_tunnels: [].into(),
             });
+            let mut worker = router.worker();
 
             let mut read_buf = vec![0; PacketMessage::measure(packet_size)];
 
@@ -63,8 +71,24 @@ fn half_duplex_iter(packet_size: usize, num_packets: usize) {
 
         // sender
         s.spawn(move || {
-            let mut router = Router::new([0; 8], vec![]);
-            let (mut controller, mut worker) = get_single_handles(&mut router);
+            let router = Router::new(&config::Router {
+                local_id: [0; 8],
+                recv_addrs: [].into(),
+                recv_tunnels: [].into(),
+                send_tunnels: [(
+                    [1; 8],
+                    config::SendTunnel {
+                        links: [Link {
+                            local: recv_addr,
+                            remote: recv_addr,
+                        }]
+                        .into(),
+                        cipher: dummy_cipher(),
+                    },
+                )]
+                .into(),
+            });
+            let mut worker = router.worker();
 
             let send_socket = UdpSocket::bind("127.0.0.1:0").unwrap();
 
@@ -72,17 +96,6 @@ fn half_duplex_iter(packet_size: usize, num_packets: usize) {
                 "sending from {} to {recv_addr}",
                 send_socket.local_addr().unwrap(),
             );
-
-            controller.transaction(|trans| {
-                trans.upsert_send_tunnel(
-                    [1; 8],
-                    dummy_cipher(),
-                    vec![Link {
-                        local: send_socket.local_addr().unwrap(),
-                        remote: recv_addr,
-                    }],
-                );
-            });
 
             let mut read_buf = vec![0; packet_size];
             let mut write_buf = Vec::new();

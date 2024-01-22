@@ -15,6 +15,7 @@ use std::{
     pin::Pin,
     slice,
     sync::{atomic::Ordering, Arc},
+    task::Poll,
 };
 
 /// A handle to the router for the use of a worker.
@@ -23,7 +24,7 @@ pub struct WorkerHandle<'r> {
     router: &'r Router,
 
     /// The last observed configuration generation, if any.
-    last_config_generation: Option<u64>,
+    last_config_generation: Option<usize>,
 }
 
 impl<'r> WorkerHandle<'r> {
@@ -36,16 +37,16 @@ impl<'r> WorkerHandle<'r> {
     }
 
     /// Check if the configuration has changed.
-    pub fn check_config(&mut self) -> Option<ConfigChanged> {
+    pub fn poll_config_changed(&mut self) -> Poll<ConfigChanged> {
         let config = self.router.state.load();
 
         if self.last_config_generation != Some(config.generation) {
             self.last_config_generation = Some(config.generation);
-            Some(ConfigChanged {
+            Poll::Ready(ConfigChanged {
                 router_state: self.router.state.load(),
             })
         } else {
-            None
+            Poll::Pending
         }
     }
 
@@ -86,14 +87,14 @@ pub struct ConfigChanged {
 
 impl ConfigChanged {
     /// Addresses on which the worker should listen for incoming packets.
-    /// 
+    ///
     /// This iterator will not yield duplicates.
     pub fn recv_addrs(&self) -> impl Iterator<Item = SocketAddr> + '_ {
         self.router_state.recv_addrs.iter().copied()
     }
 
     /// Addresses from which the worker may be expected to send outgoing packets.
-    /// 
+    ///
     /// This iterator may yield duplicates.
     pub fn send_addrs(&self) -> impl Iterator<Item = SocketAddr> + '_ {
         self.router_state
@@ -177,6 +178,7 @@ impl<'p> HandleOutgoing<'p> {
         }
     }
 
+    // TODO: consider taking the scratch buffer by reference, so the caller doesn't have to `mem::take` it or similar.
     /// Resume the coroutine, yielding the next packet to send.
     pub fn resume(&mut self, scratch: Vec<u8>) -> Option<SendPacket> {
         match self.remaining_links.next() {

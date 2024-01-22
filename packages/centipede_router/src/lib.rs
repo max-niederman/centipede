@@ -1,38 +1,44 @@
 pub mod worker;
 
-pub mod controller;
+pub mod config;
 mod packet_memory;
 
 use std::{
     collections::HashMap,
-    iter,
     net::SocketAddr,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
 };
 
 use arc_swap::ArcSwap;
 use chacha20poly1305::ChaCha20Poly1305;
-use controller::ControllerHandle;
 use packet_memory::PacketMemory;
-use worker::WorkerHandle;
+
+pub use config::ConfiguratorHandle;
+pub use worker::WorkerHandle;
 
 /// The shared state of a Centipede tunnel router.
 pub struct Router {
     /// The configured state of the router.
     state: ArcSwap<ConfiguredRouter>,
+
+    /// Lock to prevent multiple configurators from existing at once.
+    configurator_lock: AtomicBool,
 }
 
 /// The shared state of a configured Centipede tunnel router.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct ConfiguredRouter {
     /// The generation of this configuration.
-    generation: u64,
+    generation: usize,
 
     /// Our local peer identifier.
     local_id: PeerId,
 
     /// Addresses on which to listen for incoming packets.
-    /// 
+    ///
     /// This list should not contain duplicates.
     recv_addrs: Vec<SocketAddr>,
 
@@ -80,25 +86,27 @@ pub type PeerId = [u8; 8];
 
 impl Router {
     /// Create a new router.
-    pub fn new(peer_id: PeerId, recv_addrs: Vec<SocketAddr>) -> Self {
+    pub fn new(config: &config::Router) -> Self {
         Self {
-            state: ArcSwap::from_pointee(ConfiguredRouter {
-                generation: 0,
-                local_id: peer_id,
-                recv_addrs,
-                recv_tunnels: HashMap::new(),
-                send_tunnels: HashMap::new(),
-            }),
+            state: ArcSwap::from_pointee(config::apply(config, &ConfiguredRouter::default())),
+            configurator_lock: AtomicBool::new(false),
         }
     }
 
-    /// Get one controller and N worker handles to the router.
-    pub fn handles(&mut self, n: usize) -> (ControllerHandle<'_>, Vec<WorkerHandle<'_>>) {
-        let this = &*self;
+    /// Get a configurator handle to the router.
+    ///
+    /// # Panics
+    /// Panics if another configurator handle already exists.
+    pub fn configurator(&self) -> ConfiguratorHandle<'_> {
+        if self.configurator_lock.swap(true, Ordering::Acquire) {
+            panic!("another configurator already exists");
+        }
 
-        let controller = ControllerHandle::new(this);
-        let workers = iter::repeat_with(|| WorkerHandle::new(this)).take(n).collect();
+        ConfiguratorHandle::new(self)
+    }
 
-        (controller, workers)
+    /// Get a worker handle to the router.
+    pub fn worker(&self) -> WorkerHandle<'_> {
+        WorkerHandle::new(self)
     }
 }

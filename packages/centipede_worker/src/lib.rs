@@ -48,7 +48,7 @@ impl<'r> Worker<'r> {
     ///
     /// Mutably borrows an event buffer for scratch space, to avoid reallocating it.
     pub fn wait_and_handle(&mut self, events: &mut mio::Events) -> Result<(), Error> {
-        if let Some(change) = self.router_handle.check_config() {
+        if let Poll::Ready(change) = self.router_handle.poll_config_changed() {
             self.handle_config_change(change)?;
         }
 
@@ -106,7 +106,7 @@ impl<'r> Worker<'r> {
     fn handle_tun_readable(&mut self) -> Result<(), Error> {
         // TODO: optimize this
         let mut read_buf = [0; PACKET_BUFFER_SIZE];
-        let mut write_buf = vec![0; PACKET_BUFFER_SIZE];
+        let mut write_buf = Vec::new();
 
         while let Poll::Ready(n) = self.tun_queue.read(&mut read_buf).map_err(Error::ReadTun)? {
             let buf = &mut read_buf[..n];

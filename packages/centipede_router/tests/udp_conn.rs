@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io,
     net::{SocketAddr, UdpSocket},
     thread,
@@ -11,7 +11,7 @@ use centipede_proto::{
     PacketMessage,
 };
 use centipede_router::{
-    controller::ControllerHandle,
+    config::{self, ConfiguratorHandle},
     worker::{SendPacket, WorkerHandle},
     Link, PeerId, Router,
 };
@@ -55,10 +55,21 @@ fn half_duplex_single_message() {
             id: [0; 8],
             addr_count: 1,
             entrypoint: Box::new(|mut ctx: PeerCtx<'_>| {
-                let links = ctx.possible_links_to([1; 8]);
-                ctx.controller.transaction(move |trans| {
-                    trans.upsert_send_tunnel([1; 8], dummy_cipher(), links.clone())
+                ctx.configurator.configure(&config::Router {
+                    send_tunnels: {
+                        let mut map = HashMap::new();
+                        map.insert(
+                            [1; 8],
+                            config::SendTunnel {
+                                cipher: dummy_cipher(),
+                                links: ctx.possible_links_to([1; 8]),
+                            },
+                        );
+                        map
+                    },
+                    ..ctx.init_config.clone()
                 });
+
                 let mut obligations = ctx.worker.handle_outgoing(PACKET);
                 let mut scratch = Vec::new();
 
@@ -82,8 +93,19 @@ fn half_duplex_single_message() {
             id: [1; 8],
             addr_count: 1,
             entrypoint: Box::new(|mut ctx: PeerCtx<'_>| {
-                ctx.controller
-                    .transaction(|trans| trans.upsert_receive_tunnel([0; 8], dummy_cipher()));
+                ctx.configurator.configure(&config::Router {
+                    recv_tunnels: {
+                        let mut map = HashMap::new();
+                        map.insert(
+                            [0; 8],
+                            config::RecvTunnel {
+                                cipher: dummy_cipher(),
+                            },
+                        );
+                        map
+                    },
+                    ..ctx.init_config.clone()
+                });
 
                 let packets = ctx.receive_block();
                 assert_eq!(packets.len(), 1, "received wrong number of packets");
@@ -102,7 +124,8 @@ fn half_duplex_single_message() {
 
 /// The context in which a peer test program runs.
 struct PeerCtx<'r> {
-    controller: ControllerHandle<'r>,
+    init_config: config::Router,
+    configurator: ConfiguratorHandle<'r>,
     worker: WorkerHandle<'r>,
 
     sockets: Vec<UdpSocket>,
@@ -149,13 +172,18 @@ impl<'r> PeerCtx<'r> {
                 let sockets = sockets.remove(&spec.id).unwrap();
 
                 s.spawn(move || {
-                    let mut router =
-                        Router::new(spec.id, peer_addrs.get(&spec.id).unwrap().clone());
-                    let (controller, worker) = get_single_handles(&mut router);
+                    let init_config = config::Router {
+                        local_id: spec.id,
+                        recv_addrs: peer_addrs.get(&spec.id).unwrap().iter().copied().collect(),
+                        recv_tunnels: HashMap::new(),
+                        send_tunnels: HashMap::new(),
+                    };
 
+                    let router = Router::new(&init_config);
                     (spec.entrypoint)(PeerCtx {
-                        controller,
-                        worker,
+                        init_config,
+                        configurator: router.configurator(),
+                        worker: router.worker(),
                         sockets,
                         peers: peer_addrs,
                     });
@@ -164,7 +192,7 @@ impl<'r> PeerCtx<'r> {
         });
     }
 
-    fn possible_links_to(&self, peer_id: PeerId) -> Vec<Link> {
+    fn possible_links_to(&self, peer_id: PeerId) -> HashSet<Link> {
         self.sockets
             .iter()
             .map(|s| s.local_addr().unwrap())
