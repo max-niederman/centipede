@@ -31,7 +31,7 @@ pub struct RecvTunnel {
     pub cipher: ChaCha20Poly1305,
 }
 
-/// Configuration of a sending tunnel.
+/// Configuration of a sending tunndfel.
 #[derive(Clone)]
 pub struct SendTunnel {
     /// Cipher with which to encrypt messages.
