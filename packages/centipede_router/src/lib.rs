@@ -16,7 +16,7 @@ use arc_swap::ArcSwap;
 use chacha20poly1305::ChaCha20Poly1305;
 use packet_memory::PacketMemory;
 
-pub use config::ConfiguratorHandle;
+pub use config::{ConfiguratorHandle, Router as Config};
 pub use worker::WorkerHandle;
 
 /// The shared state of a Centipede tunnel router.

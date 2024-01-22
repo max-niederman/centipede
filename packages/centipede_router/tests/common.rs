@@ -1,4 +1,3 @@
-use centipede_router::{config::ConfiguratorHandle, worker::WorkerHandle, Router};
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
 
 /// A dummy cipher for testing.
