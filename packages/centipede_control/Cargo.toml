@@ -10,4 +10,9 @@ centipede_proto = { version = "0.1.0", path = "../centipede_proto" }
 centipede_router = { version = "0.1.0", path = "../centipede_router" }
 chacha20poly1305 = "0.10.1"
 ed25519-dalek = "2.1.0"
+rand = "0.8.5"
 x25519-dalek = "2.0.0"
+
+[dev-dependencies]
+rand_chacha = "0.3.1"
+ed25519-dalek = { version = "2.1.0", features = ["rand_core"] }
