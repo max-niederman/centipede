@@ -18,9 +18,6 @@ where
     /// The message's signature.
     signature: ed25519_dalek::Signature,
 
-    /// The sequence number of the message.
-    sequence_number: u64,
-
     /// The content of the message
     content: Content,
 
@@ -54,18 +51,17 @@ pub enum Content {
 
     /// Inform the receiver that the initiator is listening on
     /// (and reachable at) the address from which the message was sent.
-    Heartbeat,
+    Heartbeat {
+        /// Monotonically increasing sequence number.
+        /// Used to discard stale heartbeats.
+        sequence: u64,
+    },
 }
 
 impl<A: auth::Status> Message<A> {
     /// The claimed sender public key of this message.
     pub fn claimed_sender(&self) -> &ed25519_dalek::VerifyingKey {
         &self.sender
-    }
-
-    /// The claimed sequence number of this message.
-    pub fn claimed_sequence_number(&self) -> u64 {
-        self.sequence_number
     }
 
     /// The claimed content of this message.
@@ -80,22 +76,13 @@ impl Message<auth::Valid> {
         self.claimed_sender()
     }
 
-    /// The validated sequence number of this message.
-    pub fn sequence_number(&self) -> u64 {
-        self.claimed_sequence_number()
-    }
-
     /// The validated content of this message.
     pub fn content(&self) -> &Content {
         self.claimed_content()
     }
 
     /// Create a new control message.
-    pub fn serialize(
-        signing_key: &ed25519_dalek::SigningKey,
-        sequence_number: u64,
-        content: &Content,
-    ) -> Vec<u8> {
+    pub fn serialize(signing_key: &ed25519_dalek::SigningKey, content: &Content) -> Vec<u8> {
         let size = CONTENT_RANGE.start + bincode::serialized_size(content).unwrap_or(0) as usize;
 
         let mut buffer = vec![0; size];
@@ -103,8 +90,6 @@ impl Message<auth::Valid> {
         buffer[TAG_RANGE].copy_from_slice(&CONTROL_TAG.to_be_bytes());
 
         buffer[SENDER_KEY_RANGE].copy_from_slice(signing_key.verifying_key().as_bytes());
-
-        buffer[SEQUENCE_NUMBER_RANGE].copy_from_slice(&sequence_number.to_be_bytes());
 
         bincode::serialize_into(&mut buffer[CONTENT_RANGE], content).unwrap();
 
@@ -123,8 +108,6 @@ impl Message<auth::Valid> {
         let signature =
             ed25519_dalek::Signature::from_bytes(&buffer[SIGNATURE_RANGE].try_into().unwrap());
 
-        let sequence_number = u64::from_be_bytes(buffer[SEQUENCE_NUMBER_RANGE].try_into().unwrap());
-
         let payload =
             bincode::deserialize(&buffer[CONTENT_RANGE]).map_err(ParseError::Deserialize)?;
 
@@ -132,7 +115,6 @@ impl Message<auth::Valid> {
             Ok(_) => Ok(Message {
                 sender,
                 signature,
-                sequence_number,
                 content: payload,
                 _auth: PhantomData::<auth::Valid>,
             }),
@@ -140,7 +122,6 @@ impl Message<auth::Valid> {
                 message: Box::new(Message {
                     sender,
                     signature,
-                    sequence_number,
                     content: payload,
                     _auth: PhantomData::<auth::Invalid>,
                 }),
@@ -156,7 +137,6 @@ impl<A: auth::Status> Debug for Message<A> {
         f.debug_struct("Message")
             .field("sender", &self.sender)
             .field("signature", &self.signature)
-            .field("sequence_number", &self.sequence_number)
             .field("content", &self.content)
             .field("_auth", &A::NAME)
             .finish()
@@ -191,9 +171,8 @@ where
 const TAG_RANGE: std::ops::Range<usize> = 0..8;
 const SENDER_KEY_RANGE: std::ops::Range<usize> = 8..40;
 const SIGNATURE_RANGE: std::ops::Range<usize> = 40..104;
-const SEQUENCE_NUMBER_RANGE: std::ops::Range<usize> = 104..112;
-const CONTENT_RANGE: std::ops::RangeFrom<usize> = 112..;
-const SIGNED_RANGE: std::ops::RangeFrom<usize> = 104..;
+const CONTENT_RANGE: std::ops::RangeFrom<usize> = 104..;
+const SIGNED_RANGE: std::ops::RangeFrom<usize> = CONTENT_RANGE;
 
 /// The tag of every control message.
 pub(crate) const CONTROL_TAG: u64 = 1 << 63;
@@ -244,17 +223,16 @@ mod tests {
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&[1; 32]);
         let verifying_key = signing_key.verifying_key();
 
-        let sequence_number = 42;
         let content = Content::Initiate {
+            timestamp: Duration::ZERO,
             ecdh_public_key: x25519_dalek::PublicKey::from([0; 32]),
         };
 
-        let buffer = Message::<auth::Valid>::serialize(&signing_key, sequence_number, &content);
+        let buffer = Message::<auth::Valid>::serialize(&signing_key, &content);
 
         let message = Message::<auth::Valid>::parse_and_validate(&buffer).unwrap();
 
         assert_eq!(message.sender(), &verifying_key);
-        assert_eq!(message.sequence_number(), sequence_number);
         assert_eq!(*message.content(), content);
     }
 
@@ -263,19 +241,18 @@ mod tests {
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&[1; 32]);
         let verifying_key = signing_key.verifying_key();
 
-        let sequence_number = 44;
         let content = Content::Initiate {
+            timestamp: Duration::ZERO,
             ecdh_public_key: x25519_dalek::PublicKey::from([0; 32]),
         };
 
-        let mut buffer = Message::<auth::Valid>::serialize(&signing_key, sequence_number, &content);
+        let mut buffer = Message::<auth::Valid>::serialize(&signing_key, &content);
 
         buffer[SIGNATURE_RANGE][0] ^= 1;
 
         match Message::<auth::Valid>::parse_and_validate(&buffer) {
             Err(ParseValidateError::Validate(ValidateError { message, .. })) => {
                 assert_eq!(*message.claimed_sender(), verifying_key);
-                assert_eq!(message.claimed_sequence_number(), sequence_number);
                 assert_eq!(*message.claimed_content(), content);
             }
             Err(e) => panic!("unexpected error: {}", e),
@@ -287,12 +264,12 @@ mod tests {
     fn discriminate_control() {
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&[1; 32]);
 
-        let sequence_number = 42;
         let content = Content::Initiate {
+            timestamp: Duration::ZERO,
             ecdh_public_key: x25519_dalek::PublicKey::from([0; 32]),
         };
 
-        let buffer = Message::<auth::Valid>::serialize(&signing_key, sequence_number, &content);
+        let buffer = Message::<auth::Valid>::serialize(&signing_key, &content);
 
         assert_eq!(discriminate(buffer).unwrap(), MessageDiscriminant::Control);
     }
