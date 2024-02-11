@@ -14,21 +14,58 @@ use rand::CryptoRng;
 
 /// A Centipede control daemon, implemented as a pure state machine.
 pub struct Controller<R: CryptoRng> {
-    /// Peer state, by public key.
-    peers: HashMap<ed25519_dalek::VerifyingKey, PeerState>,
-
-    /// Actions to be taken at some point in the future.
-    timers: BTreeMap<SystemTime, TimerAction>,
+    /// Our private key.
+    private_key: ed25519_dalek::SigningKey,
 
     /// A cryptographic random number generator to use for generating ephemeral keys.
     rng: R,
+
+    /// Peer state, by public key.
+    peers: HashMap<ed25519_dalek::VerifyingKey, PeerState>,
+
+    /// Send queue for outgoing messages.
+    send_queue: Vec<Message<auth::Valid>>,
 }
 
 /// The state of the controller w.r.t. a peer.
-enum PeerState {}
+enum PeerState {
+    /// We're listening for an incoming handshake.
+    Listening {
+        /// Addresses on which we're listening for incoming packets, and will advertise to the peer.
+        rx_local_addrs: Vec<SocketAddr>,
 
-/// An action to be taken when a timer expires.
-enum TimerAction {}
+        /// The maximum time we're willing to wait between the peer's heartbeats.
+        max_heartbeat_interval: Duration,
+    },
+    /// We've initiated a handshake and are waiting for a response.
+    Initiating {
+        /// The time at which we initiated the handshake.
+        timestamp: SystemTime,
+
+        /// The ephemeral key we used to initiate the handshake.
+        ecdh_secret: x25519_dalek::EphemeralSecret,
+
+        /// Addresses we've received heartbeats from, by the time they were last received.
+        tx_remote_addrs: BTreeMap<SystemTime, Vec<SocketAddr>>,
+
+        /// The maximum time we're willing to wait between the peer's heartbeats.
+        max_heartbeat_interval: Duration,
+    },
+    /// We share a cipher with the peer and are exchanging heartbeats.
+    Connected {
+        /// The shared cipher.
+        cipher: ChaCha20Poly1305,
+
+        /// Addresses on which we're listening for incoming packets, by the last time we sent a heartbeat.
+        rx_local_addrs: BTreeMap<SystemTime, Vec<SocketAddr>>,
+
+        /// Addresses we've received heartbeats from, by the time they were last received.
+        tx_remote_addrs: BTreeMap<SystemTime, Vec<SocketAddr>>,
+
+        /// The maximum time we're willing to wait between the peer's heartbeats.
+        max_heartbeat_interval: Duration,
+    },
+}
 
 impl<R: CryptoRng> Controller<R> {
     /// Create a new, empty controller.
@@ -37,22 +74,31 @@ impl<R: CryptoRng> Controller<R> {
     ///
     /// * `now` - the current time.
     /// * `private_key` - the private key of the local peer.
-    pub fn new(now: SystemTime, private_key: ed25519_dalek::SigningKey, csprng: R) -> Self {
-        todo!()
+    /// * `rng` - a cryptographic random number generator to use for generating ephemeral keys.
+    pub fn new(now: SystemTime, private_key: ed25519_dalek::SigningKey, rng: R) -> Self {
+        Self {
+            private_key,
+            rng,
+            peers: HashMap::new(),
+            send_queue: Vec::new(),
+        }
     }
 
-    /// Register a new peer and start listening for incoming connections.
+    // TODO: add settings for generating links to the remote addresses we get heartbeats from
+    /// Register (or reregister) a peer and listen for incoming connections.
     ///
     /// # Arguments
     ///
     /// * `now` - the current time.
     /// * `public_key` - the public key of the peer.
-    /// * `recv_addrs` - addresses we'll tell the peer to send packets to.
+    /// * `rx_local_addrs` - addresses we'll tell the peer to send packets to.
+    /// * `max_heartbeat_interval` - the maximum time we're willing to wait between the peer's heartbeats.
     pub fn listen(
         &mut self,
         now: SystemTime,
         public_key: ed25519_dalek::VerifyingKey,
-        recv_addrs: Vec<SocketAddr>,
+        rx_local_addrs: Vec<SocketAddr>,
+        max_heartbeat_interval: Duration,
     ) {
         todo!()
     }
@@ -63,12 +109,12 @@ impl<R: CryptoRng> Controller<R> {
     ///
     /// * `now` - the current time.
     /// * `public_key` - the public key of the peer.
-    /// * `known_addrs` - addresses to try to send initiation messages to.
+    /// * `tx_remote_addrs` - addresses to try to send initiation messages to.
     pub fn initiate(
         &mut self,
         now: SystemTime,
         public_key: ed25519_dalek::VerifyingKey,
-        remote_addrs: Vec<SocketAddr>,
+        tx_remote_addrs: Vec<SocketAddr>,
     ) {
         todo!()
     }
@@ -219,7 +265,12 @@ mod tests {
                 clock.increment(Duration::from_millis(1));
 
                 let recv_addrs = vec![SocketAddr::new([127, 0, 0, 1].into(), 1234)];
-                controller.listen(clock.now(), peer_key, recv_addrs.clone());
+                controller.listen(
+                    clock.now(),
+                    peer_key,
+                    recv_addrs.clone(),
+                    Duration::from_secs(60),
+                );
 
                 clock.increment(Duration::from_millis(1));
 
@@ -260,6 +311,7 @@ mod tests {
                         &MessageContent::Initiate {
                             timestamp: handshake_timestamp,
                             ecdh_public_key: (&peer_secret).into(),
+                            max_heartbeat_interval: Duration::from_secs(60),
                         },
                     ),
                 );
@@ -297,6 +349,7 @@ mod tests {
                     MessageContent::InitiateAcknowledge {
                         timestamp,
                         ecdh_public_key,
+                        max_heartbeat_interval,
                     } => {
                         assert_eq!(
                             *timestamp, handshake_timestamp,
@@ -349,7 +402,12 @@ mod tests {
                     clock.increment(Duration::from_millis(1));
 
                     let local_addrs = vec![SocketAddr::new([127, 0, 0, 1].into(), 1234)];
-                    controller.listen(clock.now(), peer_key.verifying_key(), local_addrs.clone());
+                    controller.listen(
+                        clock.now(),
+                        peer_key.verifying_key(),
+                        local_addrs.clone(),
+                        Duration::from_secs(60),
+                    );
 
                     // get the post-listen router config out of the way to test the effect of `initiate`
                     assert!(controller.poll_router_config(clock.now).is_ready());
@@ -386,6 +444,7 @@ mod tests {
                         MessageContent::Initiate {
                             timestamp,
                             ecdh_public_key,
+                            max_heartbeat_interval,
                         } => {
                             assert!(
                                 *timestamp == handshake_timestamp,
@@ -405,6 +464,7 @@ mod tests {
                                 timestamp: handshake_timestamp,
                                 ecdh_public_key: (&x25519_dalek::EphemeralSecret::new(&mut rng))
                                     .into(),
+                                max_heartbeat_interval: Duration::from_secs(60),
                             },
                         ),
                     );

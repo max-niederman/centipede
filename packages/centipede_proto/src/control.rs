@@ -37,6 +37,9 @@ pub enum Content {
 
         /// The initiator's ECDH public key.
         ecdh_public_key: x25519_dalek::PublicKey,
+
+        /// The maximum time that the sender is willing to wait between heartbeats.
+        max_heartbeat_interval: Duration,
     },
 
     /// Acknowledge a connection.
@@ -47,6 +50,9 @@ pub enum Content {
 
         /// The responder's ECDH public key.
         ecdh_public_key: x25519_dalek::PublicKey,
+
+        /// The maximum time that the sender is willing to wait between heartbeats.
+        max_heartbeat_interval: Duration,
     },
 
     /// Inform the receiver that the initiator is listening on
@@ -226,6 +232,7 @@ mod tests {
         let content = Content::Initiate {
             timestamp: Duration::ZERO,
             ecdh_public_key: x25519_dalek::PublicKey::from([0; 32]),
+            max_heartbeat_interval: Duration::from_secs(60),
         };
 
         let buffer = Message::<auth::Valid>::serialize(&signing_key, &content);
@@ -244,6 +251,7 @@ mod tests {
         let content = Content::Initiate {
             timestamp: Duration::ZERO,
             ecdh_public_key: x25519_dalek::PublicKey::from([0; 32]),
+            max_heartbeat_interval: Duration::from_secs(60),
         };
 
         let mut buffer = Message::<auth::Valid>::serialize(&signing_key, &content);
@@ -267,6 +275,7 @@ mod tests {
         let content = Content::Initiate {
             timestamp: Duration::ZERO,
             ecdh_public_key: x25519_dalek::PublicKey::from([0; 32]),
+            max_heartbeat_interval: Duration::from_secs(60),
         };
 
         let buffer = Message::<auth::Valid>::serialize(&signing_key, &content);
