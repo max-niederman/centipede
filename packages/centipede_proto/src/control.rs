@@ -31,9 +31,9 @@ where
 pub enum Content {
     /// Initiate a connection.
     Initiate {
-        /// Timestamp of the initiation, measured from the UNIX epoch.
+        /// Timestamp of the initiation **on the initiator's clock**, measured from the UNIX epoch.
         /// Used to identify and order the handshake, and prevent replay attacks.
-        timestamp: Duration,
+        handshake_timestamp: Duration,
 
         /// The initiator's ECDH public key.
         ecdh_public_key: x25519_dalek::PublicKey,
@@ -44,9 +44,9 @@ pub enum Content {
 
     /// Acknowledge a connection.
     InitiateAcknowledge {
-        /// Timestamp of the initiation, measured from the UNIX epoch.
+        /// Timestamp of the initiation **on the initiator's clock**, measured from the UNIX epoch.
         /// Used to match the acknowledgement to the initiation.
-        timestamp: Duration,
+        handshake_timestamp: Duration,
 
         /// The responder's ECDH public key.
         ecdh_public_key: x25519_dalek::PublicKey,
@@ -58,9 +58,10 @@ pub enum Content {
     /// Inform the receiver that the initiator is listening on
     /// (and reachable at) the address from which the message was sent.
     Heartbeat {
-        /// Monotonically increasing sequence number.
-        /// Used to discard stale heartbeats.
-        sequence: u64,
+        /// The time at which the heartbeat was sent **on the sender's clock**, measured from the UNIX epoch.
+        /// Note that this is _not_ compared to the receiver's clock, but instead used
+        /// to discard old heartbeats (again by the sender's reckoning), preventing replay attacks.
+        timestamp: Duration,
     },
 }
 
@@ -88,19 +89,29 @@ impl Message<auth::Valid> {
     }
 
     /// Create a new control message.
-    pub fn serialize(signing_key: &ed25519_dalek::SigningKey, content: &Content) -> Vec<u8> {
-        let size = CONTENT_RANGE.start + bincode::serialized_size(content).unwrap_or(0) as usize;
+    pub fn new(signing_key: &ed25519_dalek::SigningKey, content: Content) -> Self {
+        Message {
+            sender: signing_key.verifying_key(),
+            signature: signing_key.sign(&bincode::serialize(&content).unwrap()),
+            content,
+            _auth: PhantomData::<auth::Valid>,
+        }
+    }
+
+    /// Serialize a control message to a buffer.
+    pub fn serialize(&self) -> Vec<u8> {
+        let size =
+            CONTENT_RANGE.start + bincode::serialized_size(&self.content).unwrap_or(0) as usize;
 
         let mut buffer = vec![0; size];
 
         buffer[TAG_RANGE].copy_from_slice(&CONTROL_TAG.to_be_bytes());
 
-        buffer[SENDER_KEY_RANGE].copy_from_slice(signing_key.verifying_key().as_bytes());
+        buffer[SENDER_KEY_RANGE].copy_from_slice(self.sender.as_bytes());
 
-        bincode::serialize_into(&mut buffer[CONTENT_RANGE], content).unwrap();
+        bincode::serialize_into(&mut buffer[CONTENT_RANGE], &self.content).unwrap();
 
-        let signature = signing_key.sign(&buffer[SIGNED_RANGE]);
-        buffer[SIGNATURE_RANGE].copy_from_slice(&signature.to_bytes());
+        buffer[SIGNATURE_RANGE].copy_from_slice(&self.signature.to_bytes());
 
         buffer
     }
@@ -230,12 +241,12 @@ mod tests {
         let verifying_key = signing_key.verifying_key();
 
         let content = Content::Initiate {
-            timestamp: Duration::ZERO,
+            handshake_timestamp: Duration::ZERO,
             ecdh_public_key: x25519_dalek::PublicKey::from([0; 32]),
             max_heartbeat_interval: Duration::from_secs(60),
         };
 
-        let buffer = Message::<auth::Valid>::serialize(&signing_key, &content);
+        let buffer = Message::new(&signing_key, content.clone()).serialize();
 
         let message = Message::<auth::Valid>::parse_and_validate(&buffer).unwrap();
 
@@ -249,12 +260,12 @@ mod tests {
         let verifying_key = signing_key.verifying_key();
 
         let content = Content::Initiate {
-            timestamp: Duration::ZERO,
+            handshake_timestamp: Duration::ZERO,
             ecdh_public_key: x25519_dalek::PublicKey::from([0; 32]),
             max_heartbeat_interval: Duration::from_secs(60),
         };
 
-        let mut buffer = Message::<auth::Valid>::serialize(&signing_key, &content);
+        let mut buffer = Message::new(&signing_key, content.clone()).serialize();
 
         buffer[SIGNATURE_RANGE][0] ^= 1;
 
@@ -273,12 +284,12 @@ mod tests {
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&[1; 32]);
 
         let content = Content::Initiate {
-            timestamp: Duration::ZERO,
+            handshake_timestamp: Duration::ZERO,
             ecdh_public_key: x25519_dalek::PublicKey::from([0; 32]),
             max_heartbeat_interval: Duration::from_secs(60),
         };
 
-        let buffer = Message::<auth::Valid>::serialize(&signing_key, &content);
+        let buffer = Message::new(&signing_key, content).serialize();
 
         assert_eq!(discriminate(buffer).unwrap(), MessageDiscriminant::Control);
     }

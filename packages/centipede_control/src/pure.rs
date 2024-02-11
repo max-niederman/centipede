@@ -3,8 +3,9 @@
 //! Performs no I/O, and is intended to be used as a building block for a real control daemon.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     net::SocketAddr,
+    ops::Add,
     time::{Duration, SystemTime},
 };
 
@@ -23,8 +24,17 @@ pub struct Controller<R: CryptoRng> {
     /// Peer state, by public key.
     peers: HashMap<ed25519_dalek::VerifyingKey, PeerState>,
 
+    /// Receive addresses mapped to the count of peers using them.
+    recv_addrs: HashMap<SocketAddr, usize>,
+
+    /// The current router configuration.
+    router_config: centipede_router::Config,
+
+    /// Whether the router configuration has changed since the last poll.
+    router_config_changed: bool,
+
     /// Send queue for outgoing messages.
-    send_queue: Vec<Message<auth::Valid>>,
+    send_queue: Vec<AddressedMessage>,
 }
 
 /// The state of the controller w.r.t. a peer.
@@ -35,7 +45,7 @@ enum PeerState {
         rx_local_addrs: Vec<SocketAddr>,
 
         /// The maximum time we're willing to wait between the peer's heartbeats.
-        max_heartbeat_interval: Duration,
+        rx_max_heartbeat_interval: Duration,
     },
     /// We've initiated a handshake and are waiting for a response.
     Initiating {
@@ -49,7 +59,7 @@ enum PeerState {
         tx_remote_addrs: BTreeMap<SystemTime, Vec<SocketAddr>>,
 
         /// The maximum time we're willing to wait between the peer's heartbeats.
-        max_heartbeat_interval: Duration,
+        rx_max_heartbeat_interval: Duration,
     },
     /// We share a cipher with the peer and are exchanging heartbeats.
     Connected {
@@ -63,7 +73,13 @@ enum PeerState {
         tx_remote_addrs: BTreeMap<SystemTime, Vec<SocketAddr>>,
 
         /// The maximum time we're willing to wait between the peer's heartbeats.
-        max_heartbeat_interval: Duration,
+        rx_max_heartbeat_interval: Duration,
+
+        /// The target interval between our heartbeats.
+        tx_heartbeat_interval: Duration,
+
+        /// The (peer clock) timestamp of the last heartbeat we received.
+        rx_heartbeat_timestamp: u64,
     },
 }
 
@@ -77,10 +93,18 @@ impl<R: CryptoRng> Controller<R> {
     /// * `rng` - a cryptographic random number generator to use for generating ephemeral keys.
     pub fn new(now: SystemTime, private_key: ed25519_dalek::SigningKey, rng: R) -> Self {
         Self {
-            private_key,
-            rng,
+            router_config: centipede_router::Config {
+                local_id: public_key_to_peer_id(&private_key.verifying_key()),
+                recv_addrs: HashSet::new(),
+                recv_tunnels: HashMap::new(),
+                send_tunnels: HashMap::new(),
+            },
+            router_config_changed: true,
+            recv_addrs: HashMap::new(),
             peers: HashMap::new(),
             send_queue: Vec::new(),
+            rng,
+            private_key,
         }
     }
 
@@ -135,17 +159,105 @@ impl<R: CryptoRng> Controller<R> {
     ///
     /// * `now` - the current time.
     /// * `message` - the incoming message.
-    pub fn handle_incoming(&mut self, now: SystemTime, message: Message<auth::Valid>) {
+    pub fn handle_incoming(&mut self, now: SystemTime, message: AddressedMessage) {
         todo!()
     }
 
     /// Poll for events.
     ///
     /// # Arguments
+    ///
     /// * `now` - the current time.
     pub fn poll(&mut self, now: SystemTime) -> Events {
-        todo!()
+        for peer in self.peers.values_mut() {
+            // send heartbeats
+            if let PeerState::Connected {
+                tx_heartbeat_interval,
+                tx_remote_addrs,
+                ..
+            } = peer
+            {
+                while let Some(first_entry) = tx_remote_addrs.first_entry() {
+                    if now.duration_since(*first_entry.key()).unwrap() >= *tx_heartbeat_interval {
+                        for local_addr in first_entry.remove() {
+                            for &remote_addr in tx_remote_addrs.values().flatten() {
+                                self.send_queue.push(AddressedMessage {
+                                    from: local_addr,
+                                    to: remote_addr,
+                                    message: Message::new(
+                                        &self.private_key,
+                                        centipede_proto::control::Content::Heartbeat {
+                                            timestamp: now
+                                                .duration_since(SystemTime::UNIX_EPOCH)
+                                                .unwrap(),
+                                        },
+                                    ),
+                                });
+                            }
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            // expire old tx_remote_addrs
+            if let PeerState::Initiating {
+                tx_remote_addrs,
+                rx_max_heartbeat_interval,
+                ..
+            }
+            | PeerState::Connected {
+                tx_remote_addrs,
+                rx_max_heartbeat_interval,
+                ..
+            } = peer
+            {
+                while let Some(first_entry) = tx_remote_addrs.first_entry() {
+                    if now.duration_since(*first_entry.key()).unwrap() >= *rx_max_heartbeat_interval
+                    {
+                        let to_remove = first_entry.remove();
+                        for addr in to_remove {
+                            let count = self.recv_addrs.get_mut(&addr).expect(
+                                "tx_remote_addrs should only contain addresses in recv_addrs",
+                            );
+
+                            *count -= 1;
+                            if *count == 0 {
+                                self.recv_addrs.remove(&addr);
+
+                                self.router_config.recv_addrs.remove(&addr);
+                                self.router_config_changed = true;
+                            }
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        Events {
+            router_config: if self.router_config_changed {
+                self.router_config_changed = false;
+                Some(self.router_config.clone())
+            } else {
+                None
+            },
+            outgoing_messages: std::mem::take(&mut self.send_queue),
+        }
     }
+}
+
+/// A message with source and destination addresses.
+pub struct AddressedMessage {
+    /// The address from which to send the message.
+    pub from: SocketAddr,
+    /// The address to send the message to.
+    pub to: SocketAddr,
+
+    /// The message to send.
+    pub message: Message<auth::Valid>,
 }
 
 /// The result of polling the controller for events.
@@ -154,17 +266,21 @@ pub struct Events {
     pub router_config: Option<centipede_router::Config>,
 
     /// Outgoing messages to send.
-    pub outgoing_messages: Vec<Message<auth::Valid>>,
+    pub outgoing_messages: Vec<AddressedMessage>,
+}
+
+/// Convert a public key to a peer ID by taking its first 8 bytes.
+fn public_key_to_peer_id(public_key: &ed25519_dalek::VerifyingKey) -> [u8; 8] {
+    public_key.to_bytes()[..8].try_into().unwrap()
 }
 
 #[cfg(test)]
 mod tests {
-    use std::iter;
+    use std::{iter, vec};
 
-    use centipede_proto::control::Content as MessageContent;
+    use centipede_proto::control::{Content as MessageContent, Message};
     use rand::{Rng, SeedableRng};
-    use rand_chacha::{rand_core::CryptoRngCore, ChaChaRng};
-    use x25519_dalek::x25519;
+    use rand_chacha::ChaChaRng;
 
     use super::*;
 
@@ -227,11 +343,12 @@ mod tests {
 
                 clock.increment(Duration::from_millis(1));
 
-                let recv_addrs = vec![SocketAddr::new([127, 0, 0, 1].into(), 1234)];
+                let local_addr = SocketAddr::new([127, 0, 0, 1].into(), 1234);
+                let remote_addr = SocketAddr::new([127, 0, 0, 2].into(), 45678);
                 controller.listen(
                     clock.now(),
                     peer_key,
-                    recv_addrs.clone(),
+                    vec![local_addr],
                     Duration::from_secs(60),
                 );
 
@@ -245,7 +362,7 @@ mod tests {
                 assert!(
                     router_config
                         .recv_addrs
-                        .is_superset(&recv_addrs.iter().cloned().collect()),
+                        .is_superset(&iter::once(local_addr).collect()),
                     "controller should have the recv addrs after listen"
                 );
                 assert!(
@@ -264,18 +381,22 @@ mod tests {
 
                 clock.increment(Duration::from_secs(10));
 
-                let peer_secret = x25519_dalek::EphemeralSecret::new(&mut rng);
+                let peer_secret = x25519_dalek::EphemeralSecret::random_from_rng(&mut rng);
                 let handshake_timestamp = clock.now_since_epoch();
                 controller.handle_incoming(
                     clock.now(),
-                    make_message(
-                        &private_key,
-                        &MessageContent::Initiate {
-                            timestamp: handshake_timestamp,
-                            ecdh_public_key: (&peer_secret).into(),
-                            max_heartbeat_interval: Duration::from_secs(60),
-                        },
-                    ),
+                    AddressedMessage {
+                        from: remote_addr,
+                        to: local_addr,
+                        message: Message::new(
+                            &private_key,
+                            MessageContent::Initiate {
+                                handshake_timestamp,
+                                ecdh_public_key: (&peer_secret).into(),
+                                max_heartbeat_interval: Duration::from_secs(60),
+                            },
+                        ),
+                    },
                 );
 
                 let event = controller.poll(clock.now());
@@ -301,15 +422,22 @@ mod tests {
                     .next()
                     .expect("a listening controller should respond to handshakes immediately");
                 assert_eq!(
-                    response.sender(),
+                    response.from, local_addr,
+                    "response must be from the local address"
+                );
+                assert_eq!(
+                    response.to, remote_addr,
+                    "response must be to the remote address"
+                );
+                assert_eq!(
+                    response.message.sender(),
                     &private_key.verifying_key(),
                     "response should be from the local peer"
                 );
-                match response.content() {
+                match response.message.content() {
                     MessageContent::InitiateAcknowledge {
-                        timestamp,
-                        ecdh_public_key,
-                        max_heartbeat_interval,
+                        handshake_timestamp: timestamp,
+                        ..
                     } => {
                         assert_eq!(
                             *timestamp, handshake_timestamp,
@@ -323,13 +451,15 @@ mod tests {
                     "a listening controller should send heartbeats immediately after the handshake",
                 );
                 assert_eq!(
-                    heartbeat.sender(),
+                    heartbeat.message.sender(),
                     &private_key.verifying_key(),
                     "heartbeat should be from the local peer"
                 );
                 assert_eq!(
-                    heartbeat.content(),
-                    &MessageContent::Heartbeat { sequence: 0 },
+                    heartbeat.message.content(),
+                    &MessageContent::Heartbeat {
+                        timestamp: clock.now_since_epoch()
+                    },
                     "second message from a listening controller should be the first heartbeat"
                 );
 
@@ -358,11 +488,11 @@ mod tests {
 
                     clock.increment(Duration::from_millis(1));
 
-                    let local_addrs = vec![SocketAddr::new([127, 0, 0, 1].into(), 1234)];
+                    let local_addr = SocketAddr::new([127, 0, 0, 1].into(), 1234);
                     controller.listen(
                         clock.now(),
                         peer_key.verifying_key(),
-                        local_addrs.clone(),
+                        vec![local_addr],
                         Duration::from_secs(60),
                     );
 
@@ -373,12 +503,8 @@ mod tests {
                         clock.increment(Duration::from_secs(10));
                     }
 
-                    let remote_addrs = vec![SocketAddr::new([127, 0, 0, 2].into(), 5678)];
-                    controller.initiate(
-                        clock.now(),
-                        peer_key.verifying_key(),
-                        remote_addrs.clone(),
-                    );
+                    let remote_addr = SocketAddr::new([127, 0, 0, 2].into(), 5678);
+                    controller.initiate(clock.now(), peer_key.verifying_key(), vec![remote_addr]);
 
                     let mut events = controller.poll(clock.now());
 
@@ -394,15 +520,22 @@ mod tests {
                         .expect("initiating controller should send an initiate immediately");
 
                     assert_eq!(
-                        initiate.sender(),
+                        initiate.from, local_addr,
+                        "initiate must be from the local address"
+                    );
+                    assert_eq!(
+                        initiate.to, remote_addr,
+                        "initiate must be to the remote address"
+                    );
+                    assert_eq!(
+                        initiate.message.sender(),
                         &private_key.verifying_key(),
                         "initiate should be from the local peer"
                     );
-                    match initiate.content() {
+                    match initiate.message.content() {
                         MessageContent::Initiate {
-                            timestamp,
-                            ecdh_public_key,
-                            max_heartbeat_interval,
+                            handshake_timestamp: timestamp,
+                            ..
                         } => {
                             assert!(
                                 *timestamp == handshake_timestamp,
@@ -421,15 +554,20 @@ mod tests {
 
                     controller.handle_incoming(
                         clock.now(),
-                        make_message(
-                            &peer_key,
-                            &MessageContent::InitiateAcknowledge {
-                                timestamp: handshake_timestamp,
-                                ecdh_public_key: (&x25519_dalek::EphemeralSecret::new(&mut rng))
-                                    .into(),
-                                max_heartbeat_interval: Duration::from_secs(60),
-                            },
-                        ),
+                        AddressedMessage {
+                            from: remote_addr,
+                            to: local_addr,
+                            message: Message::new(
+                                &peer_key,
+                                MessageContent::InitiateAcknowledge {
+                                    handshake_timestamp,
+                                    ecdh_public_key:
+                                        (&x25519_dalek::EphemeralSecret::random_from_rng(&mut rng))
+                                            .into(),
+                                    max_heartbeat_interval: Duration::from_secs(60),
+                                },
+                            ),
+                        },
                     );
 
                     let mut events = controller.poll(clock.now());
@@ -456,14 +594,14 @@ mod tests {
                         "an initiating controller should send heartbeats immediately after the handshake",
                     );
                     assert_eq!(
-                        heartbeat.sender(),
+                        heartbeat.message.sender(),
                         &private_key.verifying_key(),
                         "heartbeat should be from the local peer"
                     );
                     assert_eq!(
-                        heartbeat.content(),
-                        &MessageContent::Heartbeat { sequence: 0 },
-                        "second message from an initiating controller should be the first heartbeat"
+                        heartbeat.message.content(),
+                        &MessageContent::Heartbeat { timestamp: clock.now_since_epoch() },
+                        "second message from an initiating controller should be stamped with the current time"
                     );
 
                     assert!(
@@ -500,9 +638,12 @@ mod tests {
 
     fn test_clocks(mut rng: ChaChaRng) -> impl Iterator<Item = TestClock> {
         iter::once(Duration::ZERO)
-            .chain(iter::repeat_with(move || {
-                Duration::from_secs(rng.gen_range(0..(100 * 365 * 24 * 60 * 60)))
-            }))
+            .chain(
+                iter::repeat_with(move || {
+                    Duration::from_secs(rng.gen_range(0..(100 * 365 * 24 * 60 * 60)))
+                })
+                .take(100),
+            )
             .map(|dur| TestClock {
                 now: SystemTime::UNIX_EPOCH + dur,
             })
@@ -514,16 +655,5 @@ mod tests {
 
     fn test_rng() -> rand_chacha::ChaChaRng {
         rand_chacha::ChaChaRng::from_seed([42; 32])
-    }
-
-    fn make_message(
-        private_key: &ed25519_dalek::SigningKey,
-        content: &MessageContent,
-    ) -> Message<auth::Valid> {
-        Message::parse_and_validate(&Message::serialize(private_key, content)).unwrap()
-    }
-
-    fn public_key_to_peer_id(public_key: &ed25519_dalek::VerifyingKey) -> [u8; 8] {
-        public_key.to_bytes()[..8].try_into().unwrap()
     }
 }
