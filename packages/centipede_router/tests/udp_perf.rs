@@ -20,7 +20,7 @@ fn half_duplex_large_packets(b: &mut test::Bencher) {
 }
 
 #[bench]
-fn baseline_spawn_two_threads(b: &mut test::Bencher) {
+fn control_spawn_two_threads(b: &mut test::Bencher) {
     b.iter(|| {
         thread::scope(|s| {
             s.spawn(|| {});
