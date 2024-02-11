@@ -139,58 +139,22 @@ impl<R: CryptoRng> Controller<R> {
         todo!()
     }
 
-    /// Poll for outgoing messages.
+    /// Poll for events.
     ///
     /// # Arguments
-    ///
     /// * `now` - the current time.
-    pub fn poll_outgoing(&mut self, now: SystemTime) -> Poll<Message<auth::Valid>> {
-        todo!()
-    }
-
-    /// Poll for new router configurations.
-    ///
-    /// # Arguments
-    ///
-    /// * `now` - the current time.
-    pub fn poll_router_config(&mut self, now: SystemTime) -> Poll<centipede_router::Config> {
+    pub fn poll(&mut self, now: SystemTime) -> Events {
         todo!()
     }
 }
 
-/// The result of a polling operation.
-/// Either a value, or a duration to wait before polling again,
-/// assuming no other operations are performed in the meantime.
-/// If the duration is `None`, the operation is complete and
-/// will not need to be polled again, barring reconfiguration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Poll<T> {
-    Ready(T),
-    Pending(Option<Duration>),
-}
+/// The result of polling the controller for events.
+pub struct Events {
+    /// A new router configuration.
+    pub router_config: Option<centipede_router::Config>,
 
-impl<T> Poll<T> {
-    pub fn ready(self) -> Option<T> {
-        match self {
-            Poll::Ready(value) => Some(value),
-            Poll::Pending(_) => None,
-        }
-    }
-
-    pub fn pending(self) -> Option<Duration> {
-        match self {
-            Poll::Ready(_) => None,
-            Poll::Pending(duration) => duration,
-        }
-    }
-
-    pub fn is_ready(&self) -> bool {
-        matches!(self, Poll::Ready(_))
-    }
-
-    pub fn is_pending(&self) -> bool {
-        matches!(self, Poll::Pending(_))
-    }
+    /// Outgoing messages to send.
+    pub outgoing_messages: Vec<Message<auth::Valid>>,
 }
 
 #[cfg(test)]
@@ -217,12 +181,11 @@ mod tests {
 
                 clock.increment(Duration::from_millis(1));
 
-                let router_config = match controller.poll_router_config(clock.now()) {
-                    Poll::Ready(config) => config,
-                    Poll::Pending(_) => {
-                        panic!("controller should produce an initial router config")
-                    }
-                };
+                let events = controller.poll(clock.now());
+
+                let router_config = events
+                    .router_config
+                    .expect("controller should produce an initial router config");
                 assert_eq!(
                     router_config.local_id,
                     public_key_to_peer_id(&private_key.verifying_key()),
@@ -242,7 +205,7 @@ mod tests {
                 );
 
                 assert!(
-                    controller.poll_outgoing(clock.now()).is_pending(),
+                    events.outgoing_messages.is_empty(),
                     "there should be no outgoing messages for a new controller"
                 );
             }
@@ -274,12 +237,11 @@ mod tests {
 
                 clock.increment(Duration::from_millis(1));
 
-                let router_config = match controller.poll_router_config(clock.now()) {
-                    Poll::Ready(config) => config,
-                    Poll::Pending(_) => {
-                        panic!("controller should produce a router config after listen")
-                    }
-                };
+                let poll = controller.poll(clock.now());
+
+                let router_config = poll
+                    .router_config
+                    .expect("controller should produce a router config after listen");
                 assert!(
                     router_config
                         .recv_addrs
@@ -296,7 +258,7 @@ mod tests {
                 );
 
                 assert!(
-                    controller.poll_outgoing(clock.now()).is_pending(),
+                    poll.outgoing_messages.is_empty(),
                     "there should be no outgoing messages immediately after listen"
                 );
 
@@ -316,12 +278,11 @@ mod tests {
                     ),
                 );
 
-                let router_config = match controller.poll_router_config(clock.now()) {
-                    Poll::Ready(config) => config,
-                    Poll::Pending(_) => {
-                        panic!("controller should produce a router config after incoming initiate")
-                    }
-                };
+                let event = controller.poll(clock.now());
+
+                let router_config = event
+                    .router_config
+                    .expect("controller should produce a router config after listening for and receiving an incoming initiate");
                 assert!(
                     router_config.recv_tunnels.get(&public_key_to_peer_id(&peer_key)).is_some(),
                     "controller should have a recv tunnel after listening for and receiving an incoming initiate"
@@ -334,12 +295,11 @@ mod tests {
                     "controller cannot know where to send packets until receiving heartbeats"
                 );
 
-                let response = match controller.poll_outgoing(clock.now()) {
-                    Poll::Ready(message) => message,
-                    Poll::Pending(_) => {
-                        panic!("a listening controller should respond to handshakes immediately")
-                    }
-                };
+                let mut outgoing_msgs = poll.outgoing_messages.into_iter();
+
+                let response = outgoing_msgs
+                    .next()
+                    .expect("a listening controller should respond to handshakes immediately");
                 assert_eq!(
                     response.sender(),
                     &private_key.verifying_key(),
@@ -359,12 +319,9 @@ mod tests {
                     _ => panic!("controller should respond to an incoming initiate with an initiate acknowledgement"),
                 }
 
-                let heartbeat = match controller.poll_outgoing(clock.now()) {
-                    Poll::Ready(message) => message,
-                    Poll::Pending(_) => {
-                        panic!("a listening controller should send heartbeats immediately after the handshake")
-                    }
-                };
+                let heartbeat = outgoing_msgs.next().expect(
+                    "a listening controller should send heartbeats immediately after the handshake",
+                );
                 assert_eq!(
                     heartbeat.sender(),
                     &private_key.verifying_key(),
@@ -377,7 +334,7 @@ mod tests {
                 );
 
                 assert!(
-                    controller.poll_outgoing(clock.now()).is_pending(),
+                    outgoing_msgs.next().is_none(),
                     "there should be no more outgoing messages after the first heartbeat"
                 );
             }
@@ -410,7 +367,7 @@ mod tests {
                     );
 
                     // get the post-listen router config out of the way to test the effect of `initiate`
-                    assert!(controller.poll_router_config(clock.now).is_ready());
+                    let _ = controller.poll(clock.now());
 
                     if wait_to_initiate {
                         clock.increment(Duration::from_secs(10));
@@ -423,18 +380,19 @@ mod tests {
                         remote_addrs.clone(),
                     );
 
+                    let mut events = controller.poll(clock.now());
+
                     assert!(
-                        controller.poll_router_config(clock.now()).is_pending(),
+                        events.router_config.is_none(),
                         "handshake initiation should not change the router config immediately"
                     );
 
                     let handshake_timestamp = clock.now_since_epoch();
-                    let initiate = match controller.poll_outgoing(clock.now()) {
-                        Poll::Ready(message) => message,
-                        Poll::Pending(_) => {
-                            panic!("initiating controller should send an initiate immediately")
-                        }
-                    };
+                    let initiate = events
+                        .outgoing_messages
+                        .pop()
+                        .expect("initiating controller should send an initiate immediately");
+
                     assert_eq!(
                         initiate.sender(),
                         &private_key.verifying_key(),
@@ -454,6 +412,11 @@ mod tests {
                         _ => panic!("initiating controller should send an initiate immediately"),
                     }
 
+                    assert!(
+                        events.outgoing_messages.is_empty(),
+                        "there should be no more outgoing messages after the first initiate"
+                    );
+
                     clock.increment(Duration::from_millis(500));
 
                     controller.handle_incoming(
@@ -469,12 +432,11 @@ mod tests {
                         ),
                     );
 
-                    let router_config = match controller.poll_router_config(clock.now()) {
-                        Poll::Ready(config) => config,
-                        Poll::Pending(_) => {
-                            panic!("controller should produce a router config after incoming initiate acknowledgement")
-                        }
-                    };
+                    let mut events = controller.poll(clock.now());
+
+                    let router_config = events.router_config.expect(
+                        "controller should produce a router config after initiating and receiving an incoming initiate acknowledgement",
+                    );
                     assert!(
                         router_config
                             .recv_tunnels
@@ -490,12 +452,9 @@ mod tests {
                         "controller cannot know where to send packets until receiving heartbeats"
                     );
 
-                    let heartbeat = match controller.poll_outgoing(clock.now()) {
-                        Poll::Ready(message) => message,
-                        Poll::Pending(_) => {
-                            panic!("an initiating controller should send heartbeats immediately after the handshake")
-                        }
-                    };
+                    let heartbeat = events.outgoing_messages.pop().expect(
+                        "an initiating controller should send heartbeats immediately after the handshake",
+                    );
                     assert_eq!(
                         heartbeat.sender(),
                         &private_key.verifying_key(),
@@ -508,7 +467,7 @@ mod tests {
                     );
 
                     assert!(
-                        controller.poll_outgoing(clock.now()).is_pending(),
+                        events.outgoing_messages.is_empty(),
                         "there should be no more outgoing messages after the first heartbeat"
                     );
                 }
