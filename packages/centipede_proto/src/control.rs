@@ -92,6 +92,18 @@ where
         &self.content
     }
 
+    /// Forget the authentication status of this message.
+    pub fn forget_auth(self) -> Message<B, auth::Unknown> {
+        Message {
+            buffer: self.buffer,
+            sender: self.sender,
+            recipient: self.recipient,
+            signature: self.signature,
+            content: self.content,
+            _auth: PhantomData::<auth::Unknown>,
+        }
+    }
+
     /// Deconstruct the message into its underlying buffer.
     pub fn to_buffer(self) -> B {
         self.buffer
@@ -190,7 +202,7 @@ where
 impl Message<Vec<u8>, auth::Valid> {
     /// Construct a new control message from a signing key, recipient public key, and its content.
     pub fn new(
-        sender_signing_key: ed25519_dalek::SigningKey,
+        sender_signing_key: &ed25519_dalek::SigningKey,
         recipient_public_key: ed25519_dalek::VerifyingKey,
         content: Content,
     ) -> Self {
@@ -288,7 +300,7 @@ mod tests {
             max_heartbeat_interval: Duration::from_secs(60),
         };
 
-        let buffer = Message::new(signing_key, verifying_key, content.clone()).to_buffer();
+        let buffer = Message::new(&signing_key, verifying_key, content.clone()).to_buffer();
 
         let message = Message::deserialize(buffer)
             .expect("failed to deserialize valid message")
@@ -311,7 +323,7 @@ mod tests {
             max_heartbeat_interval: Duration::from_secs(60),
         };
 
-        let mut buffer = Message::new(signing_key, verifying_key, content.clone()).to_buffer();
+        let mut buffer = Message::new(&signing_key, verifying_key, content.clone()).to_buffer();
 
         buffer[SIGNATURE_RANGE][0] ^= 1;
 
@@ -338,8 +350,7 @@ mod tests {
             max_heartbeat_interval: Duration::from_secs(60),
         };
 
-        let buffer =
-            Message::new(signing_key.clone(), signing_key.verifying_key(), content).to_buffer();
+        let buffer = Message::new(&signing_key, signing_key.verifying_key(), content).to_buffer();
 
         assert_eq!(discriminate(buffer).unwrap(), MessageDiscriminant::Control);
     }

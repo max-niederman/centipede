@@ -5,7 +5,7 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     net::SocketAddr,
-    ops::Add,
+    ops::{Add, Deref},
     time::{Duration, SystemTime},
 };
 
@@ -34,7 +34,7 @@ pub struct Controller<R: CryptoRng> {
     router_config_changed: bool,
 
     /// Send queue for outgoing messages.
-    send_queue: Vec<AddressedMessage>,
+    send_queue: Vec<OutgoingMessage>,
 }
 
 /// The state of the controller w.r.t. a peer.
@@ -159,7 +159,11 @@ impl<R: CryptoRng> Controller<R> {
     ///
     /// * `now` - the current time.
     /// * `message` - the incoming message.
-    pub fn handle_incoming(&mut self, now: SystemTime, message: AddressedMessage) {
+    pub fn handle_incoming<B: Deref<Target = [u8]>>(
+        &mut self,
+        now: SystemTime,
+        message: IncomingMessage<B>,
+    ) {
         todo!()
     }
 
@@ -169,23 +173,24 @@ impl<R: CryptoRng> Controller<R> {
     ///
     /// * `now` - the current time.
     pub fn poll(&mut self, now: SystemTime) -> Events {
-        for peer in self.peers.values_mut() {
+        for (peer_key, peer_state) in self.peers.iter_mut() {
             // send heartbeats
             if let PeerState::Connected {
                 tx_heartbeat_interval,
                 tx_remote_addrs,
                 ..
-            } = peer
+            } = peer_state
             {
                 while let Some(first_entry) = tx_remote_addrs.first_entry() {
                     if now.duration_since(*first_entry.key()).unwrap() >= *tx_heartbeat_interval {
                         for local_addr in first_entry.remove() {
                             for &remote_addr in tx_remote_addrs.values().flatten() {
-                                self.send_queue.push(AddressedMessage {
+                                self.send_queue.push(OutgoingMessage {
                                     from: local_addr,
                                     to: remote_addr,
                                     message: Message::new(
                                         &self.private_key,
+                                        *peer_key,
                                         centipede_proto::control::Content::Heartbeat {
                                             timestamp: now
                                                 .duration_since(SystemTime::UNIX_EPOCH)
@@ -211,7 +216,7 @@ impl<R: CryptoRng> Controller<R> {
                 tx_remote_addrs,
                 rx_max_heartbeat_interval,
                 ..
-            } = peer
+            } = peer_state
             {
                 while let Some(first_entry) = tx_remote_addrs.first_entry() {
                     if now.duration_since(*first_entry.key()).unwrap() >= *rx_max_heartbeat_interval
@@ -249,15 +254,25 @@ impl<R: CryptoRng> Controller<R> {
     }
 }
 
-/// A message with source and destination addresses.
-pub struct AddressedMessage {
-    /// The address from which to send the message.
+/// An incoming message, consisting of a message and the address it claims to be from.
+pub struct IncomingMessage<B: Deref<Target = [u8]>> {
+    /// The address the message claims to be from.
     pub from: SocketAddr,
-    /// The address to send the message to.
+
+    /// The message.
+    pub message: Message<B, auth::Unknown>,
+}
+
+/// An outgoing message, consisting of a message and how it should be sent.
+pub struct OutgoingMessage {
+    /// The address the message should be sent from.
+    pub from: SocketAddr,
+
+    /// The address the message should be sent to.
     pub to: SocketAddr,
 
-    /// The message to send.
-    pub message: Message<auth::Valid>,
+    /// The message.
+    pub message: Message<Vec<u8>, auth::Valid>,
 }
 
 /// The result of polling the controller for events.
@@ -266,7 +281,7 @@ pub struct Events {
     pub router_config: Option<centipede_router::Config>,
 
     /// Outgoing messages to send.
-    pub outgoing_messages: Vec<AddressedMessage>,
+    pub outgoing_messages: Vec<OutgoingMessage>,
 }
 
 /// Convert a public key to a peer ID by taking its first 8 bytes.
@@ -333,7 +348,7 @@ mod tests {
     fn listen() {
         let mut rng = rand_chacha::ChaChaRng::from_seed([172; 32]);
 
-        let mut peer_key = ed25519_dalek::SigningKey::generate(&mut rng).verifying_key();
+        let mut peer_key = ed25519_dalek::SigningKey::generate(&mut rng);
 
         for private_key in test_keys(rng.clone()) {
             for mut clock in test_clocks(rng.clone()) {
@@ -347,7 +362,7 @@ mod tests {
                 let remote_addr = SocketAddr::new([127, 0, 0, 2].into(), 45678);
                 controller.listen(
                     clock.now(),
-                    peer_key,
+                    peer_key.verifying_key(),
                     vec![local_addr],
                     Duration::from_secs(60),
                 );
@@ -385,17 +400,18 @@ mod tests {
                 let handshake_timestamp = clock.now_since_epoch();
                 controller.handle_incoming(
                     clock.now(),
-                    AddressedMessage {
+                    IncomingMessage {
                         from: remote_addr,
-                        to: local_addr,
                         message: Message::new(
-                            &private_key,
+                            &peer_key,
+                            private_key.verifying_key(),
                             MessageContent::Initiate {
                                 handshake_timestamp,
                                 ecdh_public_key: (&peer_secret).into(),
                                 max_heartbeat_interval: Duration::from_secs(60),
                             },
-                        ),
+                        )
+                        .forget_auth(),
                     },
                 );
 
@@ -405,13 +421,13 @@ mod tests {
                     .router_config
                     .expect("controller should produce a router config after listening for and receiving an incoming initiate");
                 assert!(
-                    router_config.recv_tunnels.get(&public_key_to_peer_id(&peer_key)).is_some(),
+                    router_config.recv_tunnels.get(&public_key_to_peer_id(&peer_key.verifying_key())).is_some(),
                     "controller should have a recv tunnel after listening for and receiving an incoming initiate"
                 );
                 assert!(
                     router_config
                         .send_tunnels
-                        .get(&public_key_to_peer_id(&peer_key))
+                        .get(&public_key_to_peer_id(&peer_key.verifying_key()))
                         .is_none(),
                     "controller cannot know where to send packets until receiving heartbeats"
                 );
@@ -468,7 +484,7 @@ mod tests {
                     "there should be no more outgoing messages after the first heartbeat"
                 );
             }
-            peer_key = private_key.verifying_key();
+            peer_key = private_key;
         }
     }
 
@@ -554,11 +570,11 @@ mod tests {
 
                     controller.handle_incoming(
                         clock.now(),
-                        AddressedMessage {
+                        IncomingMessage {
                             from: remote_addr,
-                            to: local_addr,
                             message: Message::new(
                                 &peer_key,
+                                private_key.verifying_key(),
                                 MessageContent::InitiateAcknowledge {
                                     handshake_timestamp,
                                     ecdh_public_key:
@@ -566,7 +582,8 @@ mod tests {
                                             .into(),
                                     max_heartbeat_interval: Duration::from_secs(60),
                                 },
-                            ),
+                            )
+                            .forget_auth(),
                         },
                     );
 
