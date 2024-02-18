@@ -1,13 +1,17 @@
-use std::{fmt::Debug, marker::PhantomData, ops::Deref, time::Duration};
+use std::{
+    fmt::Debug,
+    marker::PhantomData,
+    ops::Deref,
+    time::{Duration, SystemTime},
+};
 
-use ed25519_dalek::{ed25519::signature::Keypair, Signer};
+use ed25519_dalek::Signer;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::marker::auth;
 
 /// A parsed control message used to establish and maintain a connection.
-#[derive(Clone, PartialEq, Eq)]
 pub struct Message<B, A>
 where
     B: Deref<Target = [u8]>,
@@ -40,7 +44,7 @@ pub enum Content {
     Initiate {
         /// Timestamp of the initiation **on the initiator's clock**, measured from the UNIX epoch.
         /// Used to identify and order the handshake, and prevent replay attacks.
-        handshake_timestamp: Duration,
+        handshake_timestamp: SystemTime,
 
         /// The initiator's ECDH public key.
         ecdh_public_key: x25519_dalek::PublicKey,
@@ -53,7 +57,7 @@ pub enum Content {
     InitiateAcknowledge {
         /// Timestamp of the initiation **on the initiator's clock**, measured from the UNIX epoch.
         /// Used to match the acknowledgement to the initiation.
-        handshake_timestamp: Duration,
+        handshake_timestamp: SystemTime,
 
         /// The responder's ECDH public key.
         ecdh_public_key: x25519_dalek::PublicKey,
@@ -64,12 +68,7 @@ pub enum Content {
 
     /// Inform the receiver that the initiator is listening on
     /// (and reachable at) the address from which the message was sent.
-    Heartbeat {
-        /// The time at which the heartbeat was sent **on the sender's clock**, measured from the UNIX epoch.
-        /// Note that this is _not_ compared to the receiver's clock, but instead used
-        /// to discard old heartbeats (again by the sender's reckoning), preventing replay attacks.
-        timestamp: Duration,
-    },
+    Heartbeat, // FIXME: add measures to prevent replay attacks
 }
 
 impl<B, A> Message<B, A>
@@ -228,6 +227,23 @@ impl Message<Vec<u8>, auth::Valid> {
     }
 }
 
+impl<B, A> Clone for Message<B, A>
+where
+    B: Deref<Target = [u8]> + Clone,
+    A: auth::Status,
+{
+    fn clone(&self) -> Self {
+        Self {
+            buffer: self.buffer.clone(),
+            sender: self.sender,
+            recipient: self.recipient,
+            signature: self.signature,
+            content: self.content.clone(),
+            _auth: PhantomData::<A>,
+        }
+    }
+}
+
 impl<B, A> Debug for Message<B, A>
 where
     B: Deref<Target = [u8]>,
@@ -295,7 +311,7 @@ mod tests {
         let verifying_key = signing_key.verifying_key();
 
         let content = Content::Initiate {
-            handshake_timestamp: Duration::ZERO,
+            handshake_timestamp: SystemTime::UNIX_EPOCH,
             ecdh_public_key: x25519_dalek::PublicKey::from([0; 32]),
             max_heartbeat_interval: Duration::from_secs(60),
         };
@@ -318,7 +334,7 @@ mod tests {
         let verifying_key = signing_key.verifying_key();
 
         let content = Content::Initiate {
-            handshake_timestamp: Duration::ZERO,
+            handshake_timestamp: SystemTime::UNIX_EPOCH,
             ecdh_public_key: x25519_dalek::PublicKey::from([0; 32]),
             max_heartbeat_interval: Duration::from_secs(60),
         };
@@ -345,7 +361,7 @@ mod tests {
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&[1; 32]);
 
         let content = Content::Initiate {
-            handshake_timestamp: Duration::ZERO,
+            handshake_timestamp: SystemTime::UNIX_EPOCH,
             ecdh_public_key: x25519_dalek::PublicKey::from([0; 32]),
             max_heartbeat_interval: Duration::from_secs(60),
         };
