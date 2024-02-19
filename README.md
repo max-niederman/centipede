@@ -1,21 +1,28 @@
 # Centipede
 
-Centipede is a work-in-progress multipathing VPN for improving smartphone Internet connection reliability and performance.
+Centipede is a work-in-progress multipathing VPN for improving connection reliability and performance for mobile devices and site-to-site connections.
 
-## Protocol Overview
+Like WireGuard, Centipede aims to provide a stateless user interface for establishing VPN connections.
+Peers establish connections via public key, and each side can freely roam between arbitrary sets of addresses, even behind NAT.
+This enables a few use cases, including
 
-Centipede uses two distinct protocols to establish and maintain a VPN connection:
+1. Reliably connecting mobile devices which roam between cellular networks and Wi-Fi networks.
+2. Balancing VPN connection load between multiple physical machines, without the client's knowledge.
+3. Live migration of VPN connections between physical machines, without the other peer's knowledge.
 
-- "Tunnel" protocol: IP packets are encapsulated in UDP messages, encrypted using ChaCha20Poly1305, and sent from N socket addresses on the sender to M socket addresses on the receiver.
-  Each tunnel connection is only half-duplex, so two tunnels are needed to form a symmetric VPN connection.
-- "Control" protocol: Control messages initiate tunnel connections by coordinating encryption keys and IDs for each socket address.
-  To initiate a connection, control messages are sent normally across the public Internet, but after a connection is established they can be sent through the VPN tunnel for improved reliability.
-  This is not yet implemented.
+## Protocol and Implementation Overview
 
-## To-Dos
+Centipede, like WireGuard, encapsulates IP packets in UDP datagrams encrypted with ChaCha20Poly1305 along with a small (32-byte) header.
+Each packet is sent arbitrarily many times, and the receiving peer deduplicates them on the other end.
 
-- Implement local tunnel address switching.
-- Enable multiple remote control addresses and transports per peer.
-- Handle connection failure in `Controller`.
-- Use `recvmmsg` and `sendmmsg` to increase throughput.
-- Implement routing.
+Centipede connections are initiated by a two-way handshake authenticated using Ed25519 signatures.
+After the handshake, peers send "heartbeat" messages to inform the other peer of addresses where they're reachable.
+Because the address is taken from the IP header of the mesage,
+Centipede connections can traverse NAT on one side of the connection,
+or even both with out-of-band NAT traversal for the initial handshake.
+
+Handshake initiations also include a timestamp which is used to
+
+1. Uniquely identify the handshake, allowing acknowledgements to be matched to initiations.
+2. Prevent replay attacks.
+3. Break ties between simultaneous initiations by both peers.
