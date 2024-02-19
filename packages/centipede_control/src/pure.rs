@@ -212,6 +212,8 @@ impl<R: Rng + CryptoRng> Controller<R> {
 
     /// Initiate a connection to a peer. Must be called after `listen`.
     ///
+    /// Note that this will not initiate a handshake if the peer is already connected.
+    ///
     /// # Arguments
     ///
     /// * `now` - the current time.
@@ -230,8 +232,18 @@ impl<R: Rng + CryptoRng> Controller<R> {
             .expect("initiate must be called on a connected peer. call listen first");
 
         // Extract the local addresses and the max heartbeat interval from the old state.
-        let (local_addrs, rx_max_heartbeat_interval) =
-            old_state.forget_connection_and_destructure();
+        let (local_addrs, rx_max_heartbeat_interval) = match old_state {
+            PeerState::Listening {
+                local_addrs,
+                rx_max_heartbeat_interval,
+            }
+            | PeerState::Initiating {
+                local_addrs,
+                rx_max_heartbeat_interval,
+                ..
+            } => (local_addrs, rx_max_heartbeat_interval),
+            PeerState::Connected { .. } => return,
+        };
 
         let ecdh_secret = x25519_dalek::EphemeralSecret::random_from_rng(&mut self.rng);
 
@@ -588,11 +600,13 @@ impl<R: Rng + CryptoRng> Controller<R> {
             // expire old remote_addrs
             if let PeerState::Initiating {
                 remote_addrs,
+                local_addrs,
                 rx_max_heartbeat_interval,
                 ..
             }
             | PeerState::Connected {
                 remote_addrs,
+                local_addrs,
                 rx_max_heartbeat_interval,
                 ..
             } = peer_state
@@ -603,12 +617,24 @@ impl<R: Rng + CryptoRng> Controller<R> {
                     .collect();
 
                 if !to_remove.is_empty() {
-                    self.router_config
+                    let send_tunnel = self
+                        .router_config
                         .send_tunnels
                         .get_mut(&public_key_to_peer_id(peer_key))
-                        .unwrap()
+                        .unwrap();
+
+                    send_tunnel
                         .links
                         .retain(|link| !to_remove.contains(&link.remote));
+                    self.router_config_changed = true;
+
+                    if send_tunnel.links.is_empty() {
+                        // If we have no more links, we should disconnect.
+                        *peer_state = PeerState::Listening {
+                            local_addrs: local_addrs.clone(),
+                            rx_max_heartbeat_interval: *rx_max_heartbeat_interval,
+                        };
+                    }
                 }
             }
         }
