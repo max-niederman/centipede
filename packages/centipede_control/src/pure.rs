@@ -560,6 +560,7 @@ impl<R: Rng + CryptoRng> Controller<R> {
     /// # Arguments
     ///
     /// * `now` - the current time.
+    #[must_use]
     pub fn poll(&mut self, now: SystemTime) -> Events {
         for (peer_key, peer_state) in self.peers.iter_mut() {
             // Send queued heartbeats.

@@ -36,15 +36,6 @@ pub struct Peer {
     #[serde_as(as = "Base64")]
     pub public_key: [u8; ed25519_dalek::PUBLIC_KEY_LENGTH],
 
-    /// Links over which to send packets to the peer.
-    pub links: Vec<Link>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Link {
-    /// The local address.
-    pub local: SocketAddr,
-
-    /// The remote address.
-    pub remote: SocketAddr,
+    /// Known remote addresses of the peer.
+    pub remote_addrs: Vec<SocketAddr>,
 }
