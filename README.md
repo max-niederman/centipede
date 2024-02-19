@@ -26,3 +26,13 @@ Handshake initiations also include a timestamp which is used to
 1. Uniquely identify the handshake, allowing acknowledgements to be matched to initiations.
 2. Prevent replay attacks.
 3. Break ties between simultaneous initiations by both peers.
+
+## Performance
+
+Centipede's current implementation is highly performant for a userspace VPN.
+It uses a thread-per-core architecture, with all shared state implemented in a lock-free manner.
+In addition to userspace state, Centipede creates TUN queues and sets of UDP sockets for each worker, eliminating the need for expensive cross-thread synchronization on the kernel's part.
+
+Below are some benchmark results of Centipede against WireGuard's user- and kernel-space implementations.
+
+![Benchmark results ](./benchmark.png)
