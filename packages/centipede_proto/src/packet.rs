@@ -5,6 +5,7 @@ use std::{
 };
 
 use chacha20poly1305::{AeadInPlace, ChaCha20Poly1305, Nonce, Tag};
+use miette::Diagnostic;
 use thiserror::Error;
 
 use crate::marker::{auth, text};
@@ -336,11 +337,17 @@ impl<'v> DerefMut for ByteVecMut<'v> {
 }
 
 /// An error representing a failure to parse a packet message.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Diagnostic)]
 pub enum ParseError {
     #[error("attempted to parse a packet message from too small a buffer")]
+    #[diagnostic(code(centipede::proto::packet::buffer_too_small))]
     BufferTooSmall,
+
     #[error("attempted to parse a packet message with an invalid tag {0:x}")]
+    #[diagnostic(
+        code(centipede::proto::packet::invalid_tag),
+        help("make sure you are correctly discriminating the message type")
+    )]
     InvalidTag(u64),
 }
 

@@ -6,6 +6,7 @@ use std::{
 };
 
 use ed25519_dalek::Signer;
+use miette::Diagnostic;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -136,9 +137,9 @@ where
             return Err(ParseError::BufferTooSmall);
         }
 
-        if buffer[TAG_RANGE] != u64::to_be_bytes(CONTROL_TAG) {
-            return Err(ParseError::Tag(u64::from_be_bytes(
-                buffer[TAG_RANGE].try_into().unwrap(),
+        if buffer[KIND_RANGE] != u64::to_be_bytes(CONTROL_KIND) {
+            return Err(ParseError::InvalidKind(u64::from_be_bytes(
+                buffer[KIND_RANGE].try_into().unwrap(),
             )));
         }
 
@@ -154,7 +155,8 @@ where
             signature: ed25519_dalek::Signature::from_bytes(
                 &buffer[SIGNATURE_RANGE].try_into().unwrap(),
             ),
-            content: bincode::deserialize(&buffer[CONTENT_RANGE]).map_err(ParseError::Content)?,
+            content: serde_json::from_slice(&buffer[CONTENT_RANGE])
+                .map_err(ParseError::Content)?,
             buffer,
             _auth: PhantomData::<auth::Unknown>,
         })
@@ -217,13 +219,12 @@ impl Message<Vec<u8>, auth::Valid> {
         recipient_public_key: ed25519_dalek::VerifyingKey,
         content: Content,
     ) -> Self {
-        let mut buffer =
-            vec![0; CONTENT_RANGE.start + bincode::serialized_size(&content).unwrap() as usize];
+        let mut buffer = vec![0; CONTENT_RANGE.start];
 
-        buffer[TAG_RANGE].copy_from_slice(&u64::to_be_bytes(CONTROL_TAG));
+        buffer[KIND_RANGE].copy_from_slice(&u64::to_be_bytes(CONTROL_KIND));
         buffer[SENDER_KEY_RANGE].copy_from_slice(sender_signing_key.verifying_key().as_bytes());
         buffer[RECIPIENT_KEY_RANGE].copy_from_slice(recipient_public_key.as_bytes());
-        bincode::serialize_into(&mut buffer[CONTENT_RANGE], &content).unwrap();
+        serde_json::to_writer(&mut buffer, &content).unwrap();
 
         let signature = sender_signing_key.sign(&buffer[SIGNED_RANGE]);
         buffer[SIGNATURE_RANGE].copy_from_slice(&signature.to_bytes());
@@ -273,33 +274,41 @@ where
 }
 
 // Ranges of the message buffer.
-const TAG_RANGE: std::ops::Range<usize> = 0..8;
+const KIND_RANGE: std::ops::Range<usize> = 0..8;
 const SENDER_KEY_RANGE: std::ops::Range<usize> = 8..40;
 const SIGNATURE_RANGE: std::ops::Range<usize> = 40..104;
 const RECIPIENT_KEY_RANGE: std::ops::Range<usize> = 104..136;
 const CONTENT_RANGE: std::ops::RangeFrom<usize> = 136..;
 const SIGNED_RANGE: std::ops::RangeFrom<usize> = 104..;
 
-/// The tag of every control message.
-pub(crate) const CONTROL_TAG: u64 = 1 << 63;
+/// The kind of every control message.
+pub(crate) const CONTROL_KIND: u64 = 1 << 63;
 
 /// An error representing a failure to parse a control message.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Diagnostic)]
 pub enum ParseError {
     #[error("attempted to parse a control message from too small a buffer")]
+    #[diagnostic(code(centipede::proto::control::buffer_too_small))]
     BufferTooSmall,
 
-    #[error("unknown message tag: {0}")]
-    Tag(u64),
+    #[error("invalid message kind: {0}")]
+    #[diagnostic(
+        code(centipede::proto::control::invalid_kind),
+        help("make sure you are correctly discriminating the message type")
+    )]
+    InvalidKind(u64),
 
     #[error("invalid sender public key")]
+    #[diagnostic(code(centipede::proto::control::invalid_sender_key))]
     SenderKey(#[source] ed25519_dalek::SignatureError),
 
     #[error("invalid recipient public key")]
+    #[diagnostic(code(centipede::proto::control::invalid_recipient_key))]
     RecipientKey(#[source] ed25519_dalek::SignatureError),
 
     #[error("failed to deserialize payload")]
-    Content(#[source] bincode::Error),
+    #[diagnostic(code(centipede::proto::control::malformed_payload))]
+    Content(#[source] serde_json::Error),
 }
 
 /// An error representing a failure to validate a control message.

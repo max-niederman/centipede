@@ -10,6 +10,7 @@ centipede_proto = { version = "0.1.0", path = "../centipede_proto" }
 centipede_router = { version = "0.1.0", path = "../centipede_router" }
 hypertube = "0.2.2"
 log = "0.4.20"
+miette = "7.2.0"
 mio = { version = "0.8.10", features = ["os-poll", "os-ext"] }
 socket2 = { version = "0.5.5", features = ["all"] }
 thiserror = "1.0.56"

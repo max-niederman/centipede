@@ -4,6 +4,7 @@ pub mod packet;
 
 use std::ops::Deref;
 
+use miette::Diagnostic;
 use thiserror::Error;
 
 pub use control::Message as ControlMessage;
@@ -29,12 +30,14 @@ pub enum MessageDiscriminant {
     Packet,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Diagnostic)]
 pub enum DiscriminationError {
     #[error("message is too short")]
+    #[diagnostic(code(centipede::proto::discrimination::message_too_short))]
     TooShort,
 
     #[error("nonexistent message discriminant: {0:x}")]
+    #[diagnostic(code(centipede::proto::discrimination::nonexistent_discriminant))]
     InvalidDiscriminant(u64),
 }
 

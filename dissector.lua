@@ -1,24 +1,37 @@
-tunnel_proto = Proto("cp_tunnel", "Centipede Tunnel Protocol")
+tunnel_proto = Proto("centipede", "Centipede Protocol")
 
-endpoint_id = ProtoField.uint32("cp_tunnel.endpoint_id", "Endpoint ID", base.DEC)
-sequence = ProtoField.uint64("cp_tunnel.sequence", "Sequence Number", base.DEC)
+discriminant = ProtoField.string("centipede.discriminant", "Discriminant", base.NONE)
+sequence_number = ProtoField.uint64("centipede.sequence_number", "Sequence Number", base.DEC)
 
 tunnel_proto.fields = { endpoint_id, sequence }
 
 function tunnel_proto.dissector(buffer, pinfo, tree)
-    pinfo.cols.protocol = "CP_TUN"
-
-    pinfo.cols.info = "Tunneled packet addressed to endpoint " .. buffer(0, 4):uint() .. " with sequence number " .. buffer(4, 8):uint64() .. "."
+    pinfo.cols.protocol = "CP"
 
     local subtree = tree:add(tunnel_proto, buffer(), "Centipede Tunnel Protocol")
 
-    subtree:add(endpoint_id, buffer(0, 4))
-    subtree:add(sequence, buffer(4, 8))
-    subtree:add(buffer(0, 12), "Nonce: " .. buffer(0, 12):bytes():tohex())
-    subtree:add(buffer(12, 16), "Tag: " .. buffer(12, 16):bytes():tohex())
-    subtree:add(buffer(28, -1), "Encrypted Packet")
+    if buffer(0, 8):uint64() == UInt64.fromhex("8000000000000000") then
+        pinfo.cols.info = "Control message"
+
+        subtree:add(discriminant, buffer(0, 8), "control")
+
+        subtree:add(buffer(8, 32), "Sender Key: " .. buffer(8, 32):bytes():tohex())
+        subtree:add(buffer(40, 32), "Signature: " .. buffer(40, 64):bytes():tohex())
+        subtree:add(buffer(104, 32), "Recipient Key: " .. buffer(104, 32):bytes():tohex())
+        subtree:add(buffer(136, -1), "Serialized Content: " .. buffer(136, -1):raw())
+        subtree:add(buffer(104, -1), "Signed Content")
+    else
+        pinfo.cols.info = "Packet message with sequence number " .. buffer(0, 8):uint64()
+
+        subtree:add(discriminant, buffer(0, 8), "packet")
+
+        subtree:add(sequence_number, buffer(0, 8), "Sequence Number: " .. buffer(0, 8):uint64())
+        subtree:add(buffer(8, 8), "Sender: " .. buffer(8, 8):bytes():tohex())
+        subtree:add(buffer(0, 12), "Nonce: " .. buffer(0, 12):bytes():tohex())
+        subtree:add(buffer(16, 16), "Tag: " .. buffer(16, 16):bytes():tohex())
+        subtree:add(buffer(32, -1), "Encrypted Packet: " .. buffer(32, -1):bytes():tohex())
+    end
 end
 
 udp_table = DissectorTable.get("udp.port")
-udp_table:add(5010, tunnel_proto)
-udp_table:add(5011, tunnel_proto)
+udp_table:add(5000, tunnel_proto)

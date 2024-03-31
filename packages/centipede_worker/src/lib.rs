@@ -7,13 +7,13 @@ use std::{
     net::SocketAddr,
     ops::Deref,
     os::fd::AsRawFd,
-    sync::mpsc,
     task::Poll,
     time::Duration,
 };
 
 use centipede_proto::{marker::auth, ControlMessage, MessageDiscriminant, PacketMessage};
 use centipede_router::worker::{ConfigChanged, WorkerHandle};
+use miette::Diagnostic;
 use mio::unix::SourceFd;
 use sockets::Sockets;
 use thiserror::Error;
@@ -197,12 +197,10 @@ impl<'r> Worker<'r> {
                         }
                     }
                 }
-                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(()),
                 Err(e) => return Err(Error::ReadSocket(e))?,
             }
         }
-
-        todo!()
     }
 }
 
@@ -210,23 +208,28 @@ const TUN_TOKEN: mio::Token = mio::Token(usize::MAX);
 
 const PACKET_BUFFER_SIZE: usize = 65536;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Diagnostic)]
 pub enum Error {
     #[error("failed to poll for events")]
+    #[diagnostic(code(centipede::worker::poll_failed))]
     Poll(#[from] io::Error),
 
     #[error(transparent)]
     Sockets(#[from] sockets::SocketsError),
 
     #[error("failed to read from TUN device")]
+    #[diagnostic(code(centipede::worker::read_tun_failed))]
     ReadTun(#[source] io::Error),
 
     #[error("failed to write to UDP socket")]
+    #[diagnostic(code(centipede::worker::write_socket_failed))]
     WriteSocket(#[source] io::Error),
 
     #[error("failed to read from UDP socket")]
+    #[diagnostic(code(centipede::worker::read_socket_failed))]
     ReadSocket(#[source] io::Error),
 
     #[error("failed to write to TUN device")]
+    #[diagnostic(code(centipede::worker::write_tun_failed))]
     WriteTun(#[source] io::Error),
 }

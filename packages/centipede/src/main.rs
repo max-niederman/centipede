@@ -1,4 +1,5 @@
 use std::{
+    error::Error,
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -11,7 +12,9 @@ use std::{
 use centipede_control::{Controller, IncomingMessage};
 use centipede_router::Router;
 use centipede_worker::Worker;
+use miette::{Context, Diagnostic, IntoDiagnostic, Report, Result};
 use rand::thread_rng;
+use thiserror::Error;
 
 mod config;
 
@@ -21,7 +24,7 @@ struct Opt {
     config: PathBuf,
 }
 
-fn main() {
+fn main() -> Result<()> {
     pretty_env_logger::init();
 
     let opt = <Opt as clap::Parser>::parse();
@@ -32,7 +35,8 @@ fn main() {
             .expect("failed to open config file")
             .as_str(),
     )
-    .expect("failed to parse config");
+    .into_diagnostic()
+    .wrap_err("failed to parse config")?;
     log::debug!("config: {:#?}", config);
 
     let now = SystemTime::now();
@@ -42,7 +46,9 @@ fn main() {
         thread_rng(),
     );
     for peer in config.peers {
-        let public_key = ed25519_dalek::VerifyingKey::from_bytes(&peer.public_key).unwrap();
+        let public_key = ed25519_dalek::VerifyingKey::from_bytes(&peer.public_key)
+            .into_diagnostic()
+            .wrap_err("peer configuration had invalid public key")?;
 
         controller.listen(
             now,
@@ -64,7 +70,8 @@ fn main() {
         .with_netmask(config.address.network())
         .with_num_queues(config.workers)
         .build()
-        .expect("failed to create tun device");
+        .into_diagnostic()
+        .wrap_err("failed to create tun device")?;
 
     let (tx_incoming_control, rx_incoming_control) =
         mpsc::channel::<centipede_control::IncomingMessage<Vec<u8>>>();
@@ -94,7 +101,8 @@ fn main() {
                 control_message_sink.clone(),
                 tun_dev
                     .queue_nonblocking(0)
-                    .expect("failed getting first tun queue"),
+                    .into_diagnostic()
+                    .wrap_err("failed to get TUN queue 0 (for the special first worker)")?,
             );
 
             s.spawn(move || {
@@ -105,16 +113,38 @@ fn main() {
                     }
 
                     if let Ok(outgoing) = rx_outgoing_control.try_recv() {
-                        worker
-                            .send_control_message::<Vec<u8>>(
-                                outgoing.from,
-                                outgoing.to,
-                                outgoing.message,
-                            )
-                            .expect("failed sending control message");
+                        let res = worker.send_control_message::<Vec<u8>>(
+                            outgoing.from,
+                            outgoing.to,
+                            outgoing.message,
+                        );
+
+                        if let Err(e) = res {
+                            println!(
+                                "{:?}",
+                                Report::new(InWorkerThread {
+                                    inner: e,
+                                    thread_number: 0
+                                })
+                            );
+
+                            log::info!("shutting down due to error");
+                            shutdown.store(true, Ordering::Relaxed);
+                        }
                     }
 
-                    worker.wait_and_handle(&mut events).unwrap();
+                    if let Err(e) = worker.wait_and_handle(&mut events) {
+                        println!(
+                            "{:?}",
+                            Report::new(InWorkerThread {
+                                inner: e,
+                                thread_number: 0
+                            })
+                        );
+
+                        log::info!("shutting down due to error");
+                        shutdown.store(true, Ordering::Relaxed);
+                    }
                 }
             });
         }
@@ -125,8 +155,9 @@ fn main() {
                 router.worker(),
                 control_message_sink.clone(),
                 tun_dev
-                    .queue_nonblocking(i)
-                    .expect("failed getting additional tun queue"),
+                    .queue_nonblocking(0)
+                    .into_diagnostic()
+                    .wrap_err_with(|| format!("failed to get TUN queue {}", i))?,
             );
             s.spawn(move || {
                 let mut events = mio::Events::with_capacity(1024);
@@ -134,8 +165,18 @@ fn main() {
                     if shutdown.load(Ordering::Relaxed) {
                         break;
                     }
+                    if let Err(e) = worker.wait_and_handle(&mut events) {
+                        println!(
+                            "{:?}",
+                            Report::new(InWorkerThread {
+                                inner: e,
+                                thread_number: i
+                            })
+                        );
 
-                    worker.wait_and_handle(&mut events).unwrap();
+                        log::info!("shutting down due to error");
+                        shutdown.store(true, Ordering::Relaxed);
+                    }
                 }
             });
         }
@@ -143,15 +184,18 @@ fn main() {
         let router_configurator = router.configurator();
         loop {
             if shutdown.load(Ordering::Relaxed) {
-                log::info!("Received shutdown signal, waiting for workers to finish...");
+                log::info!("received shutdown signal, waiting for workers to finish...");
                 break;
             }
 
             let incoming = match rx_incoming_control.recv_timeout(Duration::from_millis(10)) {
                 Ok(incoming) => Some(incoming),
                 Err(mpsc::RecvTimeoutError::Timeout) => None,
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    panic!("incoming control message channel disconnected")
+                res => {
+                    return res
+                        .map(|_| ())
+                        .into_diagnostic()
+                        .wrap_err("failed to receive from incoming control message channel")
                 }
             };
 
@@ -168,8 +212,24 @@ fn main() {
             }
 
             for outgoing in events.outgoing_messages {
-                tx_outgoing_control.send(outgoing).unwrap();
+                tx_outgoing_control
+                    .send(outgoing)
+                    .into_diagnostic()
+                    .wrap_err("failed to send outgoing message using control message channel")?;
             }
         }
-    });
+
+        Ok(())
+    })
+}
+
+#[derive(Debug, Error, Diagnostic)]
+#[error("worker thread {thread_number} failed")]
+struct InWorkerThread<E: Error + 'static> {
+    /// The error that occurred in the worker thread.
+    #[source]
+    inner: E,
+
+    /// The worker thread number.
+    thread_number: usize,
 }

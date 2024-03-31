@@ -1,5 +1,6 @@
 use std::{collections::HashMap, io, mem, net::SocketAddr};
 
+use miette::Diagnostic;
 use socket2::Socket;
 use thiserror::Error;
 
@@ -98,6 +99,8 @@ impl Sockets {
 
 /// Bind and configure a socket.
 fn bind_socket(local_addr: SocketAddr) -> io::Result<Socket> {
+    log::trace!("binding to {}", local_addr);
+
     // Create a new UDP socket.
     let socket = Socket::new(socket2::Domain::IPV4, socket2::Type::DGRAM, None)?;
 
@@ -122,13 +125,15 @@ pub struct UpdateStats {
     opened: usize,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Diagnostic)]
 #[error("failed to update sockets")]
 pub enum SocketsError {
     #[error("failed to bind socket")]
+    #[diagnostic(code(centipede::worker::bind_socket_failed))]
     BindSocket(#[source] std::io::Error),
 
     #[error("failed to duplicate socket file descriptor")]
+    #[diagnostic(code(centipede::worker::duplicate_socket_failed))]
     DuplicateSocketFd(#[source] std::io::Error),
 }
 

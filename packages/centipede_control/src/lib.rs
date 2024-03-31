@@ -150,6 +150,8 @@ impl<R: Rng + CryptoRng> Controller<R> {
         local_addrs: HashSet<SocketAddr>,
         max_heartbeat_interval: Duration,
     ) {
+        log::debug!("listening for incoming connections from {public_key:?}");
+
         // Add the addresses to the router config, and mark it as changed if necessary.
         // This must happen for any current state of the peer,
         // since we're going to need to listen on these addresses regardless.
@@ -236,6 +238,8 @@ impl<R: Rng + CryptoRng> Controller<R> {
         public_key: ed25519_dalek::VerifyingKey,
         remote_addrs: Vec<SocketAddr>,
     ) {
+        log::debug!("initiating connection to {public_key:?} at {remote_addrs:?}");
+
         // Get the old state, ensuring that we know the peer.
         let old_state = self
             .peers
@@ -299,6 +303,8 @@ impl<R: Rng + CryptoRng> Controller<R> {
     /// * `now` - the current time.
     /// * `public_key` - the public key of the peer.
     pub fn disconnect(&mut self, now: SystemTime, public_key: ed25519_dalek::VerifyingKey) {
+        log::debug!("disconnecting from {public_key:?}");
+
         // Right now, we just clean up all references to the peer.
         // In the future, we might want to also send a disconnect message to the peer.
 
@@ -347,6 +353,12 @@ impl<R: Rng + CryptoRng> Controller<R> {
         now: SystemTime,
         incoming: IncomingMessage<B>,
     ) {
+        log::debug!(
+            "handling incoming message from remote addr {:?} with claimed content {:?}",
+            incoming.from,
+            incoming.message.claimed_content(),
+        );
+
         // First we make all the checks we can without verifying the message's signature.
 
         // Check that the message even claims to be addressed to us.
@@ -544,17 +556,22 @@ impl<R: Rng + CryptoRng> Controller<R> {
                 }
 
                 // If we are connected, add a send link if we don't have one yet.
-                if let PeerState::Connected { sending_to, .. } = &mut state {
-                    if sending_to.insert(incoming.from) {
+                if let PeerState::Connected {
+                    sending_to,
+                    local_addrs,
+                    ..
+                } = &mut state
+                {
+                    if !sending_to.insert(incoming.from) {
                         self.router_config
                             .send_tunnels
                             .get_mut(&public_key_to_peer_id(message.sender()))
                             .unwrap()
                             .links
-                            .insert(centipede_router::Link {
-                                local: incoming.from,
+                            .extend(local_addrs.iter().map(|&local| centipede_router::Link {
+                                local,
                                 remote: incoming.from,
-                            });
+                            }));
                         self.router_config_changed = true;
                     }
                 }
@@ -649,6 +666,13 @@ impl<R: Rng + CryptoRng> Controller<R> {
                     }
                 }
             }
+        }
+
+        if self.router_config_changed {
+            log::debug!("poll resulted in router config change",);
+        }
+        if !self.send_queue.is_empty() {
+            log::debug!("poll resulted in sending messages: {:#?}", self.send_queue);
         }
 
         Events {
