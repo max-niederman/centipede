@@ -4,11 +4,10 @@
 use std::{
     io,
     mem::{self, MaybeUninit},
+    net::SocketAddr,
+    ops::Deref,
     os::fd::AsRawFd,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
+    sync::mpsc,
     task::Poll,
     time::Duration,
 };
@@ -55,6 +54,20 @@ impl<'r> Worker<'r> {
         }
     }
 
+    /// Send a control message using the worker's set of sockets.
+    pub fn send_control_message<B: Deref<Target = [u8]>>(
+        &mut self,
+        local_addr: SocketAddr,
+        remote_addr: SocketAddr,
+        message: ControlMessage<B, auth::Valid>,
+    ) -> Result<(), Error> {
+        self.sockets
+            .resolve_or_bind_local_addr(local_addr)?
+            .send_to(message.as_buffer(), &remote_addr.into())?;
+
+        Ok(())
+    }
+
     /// Wait for at least one event and handle it.
     ///
     /// Mutably borrows an event buffer for scratch space, to avoid reallocating it.
@@ -74,21 +87,6 @@ impl<'r> Worker<'r> {
                 TUN_TOKEN => self.handle_tun_readable()?,
                 mio::Token(idx) => self.handle_socket_readable(idx)?,
             }
-        }
-
-        Ok(())
-    }
-
-    /// Handle events repeatedly until a shutdown is requested.
-    pub fn handle_until(&mut self, shutdown: &AtomicBool) -> Result<(), Error> {
-        let mut events_scratch = mio::Events::with_capacity(1024);
-
-        loop {
-            if shutdown.load(Ordering::Relaxed) {
-                break;
-            }
-
-            self.wait_and_handle(&mut events_scratch)?;
         }
 
         Ok(())
