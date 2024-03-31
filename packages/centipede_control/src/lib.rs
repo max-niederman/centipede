@@ -98,28 +98,37 @@ enum PeerState {
 }
 
 impl<R: Rng + CryptoRng> Controller<R> {
-    /// Create a new, empty controller.
+    /// Create a new, empty controller and initial router config.
     ///
     /// # Arguments
     ///
     /// * `now` - the current time.
     /// * `private_key` - the private key of the local peer.
     /// * `rng` - a cryptographic random number generator to use for generating ephemeral keys.
-    pub fn new(now: SystemTime, private_key: ed25519_dalek::SigningKey, rng: R) -> Self {
-        Self {
-            router_config: centipede_router::Config {
-                local_id: public_key_to_peer_id(&private_key.verifying_key()),
-                recv_addrs: HashSet::new(),
-                recv_tunnels: HashMap::new(),
-                send_tunnels: HashMap::new(),
+    pub fn new(
+        now: SystemTime,
+        private_key: ed25519_dalek::SigningKey,
+        rng: R,
+    ) -> (Self, centipede_router::Config) {
+        let router_config = centipede_router::Config {
+            local_id: public_key_to_peer_id(&private_key.verifying_key()),
+            recv_addrs: HashSet::new(),
+            recv_tunnels: HashMap::new(),
+            send_tunnels: HashMap::new(),
+        };
+
+        (
+            Self {
+                router_config: router_config.clone(),
+                router_config_changed: false,
+                recv_addrs: HashMap::new(),
+                peers: HashMap::new(),
+                send_queue: Vec::new(),
+                rng,
+                private_key,
             },
-            router_config_changed: true,
-            recv_addrs: HashMap::new(),
-            peers: HashMap::new(),
-            send_queue: Vec::new(),
-            rng,
-            private_key,
-        }
+            router_config,
+        )
     }
 
     // TODO: add settings for generating links to the remote addresses we get heartbeats from

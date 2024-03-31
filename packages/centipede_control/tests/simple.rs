@@ -22,15 +22,11 @@ fn construction() {
                 "testing controller construction with clock = {clock:?} and pk = {private_key:?}"
             );
 
-            let mut controller = Controller::new(clock.now(), private_key.clone(), rng.clone());
+            let (mut controller, router_config) =
+                Controller::new(clock.now(), private_key.clone(), rng.clone());
 
             clock.increment(Duration::from_millis(1));
 
-            let events = controller.poll(clock.now());
-
-            let router_config = events
-                .router_config
-                .expect("controller should produce an initial router config");
             assert_eq!(
                 router_config.local_id,
                 public_key_to_peer_id(&private_key.verifying_key()),
@@ -49,6 +45,12 @@ fn construction() {
                 "controller should start with no send tunnels"
             );
 
+            let events = controller.poll(clock.now());
+
+            assert!(
+                events.router_config.is_none(),
+                "there should be no router config updates for a new controller"
+            );
             assert!(
                 events.outgoing_messages.is_empty(),
                 "there should be no outgoing messages for a new controller"
@@ -68,7 +70,8 @@ fn listen() {
         for mut clock in test_clocks(rng.clone()) {
             println!("testing listen with clock = {clock:?} and pk = {private_key:?}");
 
-            let mut controller = Controller::new(clock.now(), private_key.clone(), rng.clone());
+            let (mut controller, _) =
+                Controller::new(clock.now(), private_key.clone(), rng.clone());
 
             clock.increment(Duration::from_millis(1));
 
@@ -211,7 +214,7 @@ fn initiate() {
             for wait_to_initiate in [false, true] {
                 println!("testing initiate with clock = {clock:?}, pk = {private_key:?}, and wait_to_initiate = {wait_to_initiate}");
 
-                let mut controller = Controller::new(clock.now(), private_key.clone(), rng.clone());
+                let (mut controller, _) = Controller::new(clock.now(), private_key.clone(), rng.clone());
 
                 clock.increment(Duration::from_millis(1));
 
@@ -354,7 +357,6 @@ fn initiate() {
 
 // TODO: add tests for receiving heartbeats, disconnecting
 // TODO: add test using two controllers to test that they can communicate
-
 
 /// Convert a public key to a peer ID by taking its first 8 bytes.
 fn public_key_to_peer_id(public_key: &ed25519_dalek::VerifyingKey) -> [u8; 8] {
