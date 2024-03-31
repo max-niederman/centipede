@@ -1,4 +1,4 @@
-use std::{ffi::CString, net::SocketAddr};
+use std::{ffi::CString, net::SocketAddr, time::Duration};
 
 use cidr::IpInet;
 use serde::{Deserialize, Serialize};
@@ -42,4 +42,12 @@ pub struct Peer {
 
     /// Known remote addresses of the peer.
     pub remote_addrs: Vec<SocketAddr>,
+
+    /// Maximum time to wait for heartbeats from the peer before disconnecting.
+    #[serde(default = "default_max_heartbeat_interval")]
+    pub max_heartbeat_interval: Duration,
+}
+
+fn default_max_heartbeat_interval() -> Duration {
+    Duration::from_secs(60)
 }

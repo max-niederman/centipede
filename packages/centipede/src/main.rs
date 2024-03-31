@@ -35,14 +35,28 @@ fn main() {
     .expect("failed to parse config");
     log::debug!("config: {:#?}", config);
 
+    let now = SystemTime::now();
     let (mut controller, init_router_config) = Controller::new(
-        SystemTime::now(),
+        now,
         ed25519_dalek::SigningKey::from_bytes(&config.private_key),
         thread_rng(),
     );
+    for peer in config.peers {
+        let public_key = ed25519_dalek::VerifyingKey::from_bytes(&peer.public_key).unwrap();
+
+        controller.listen(
+            now,
+            public_key,
+            peer.local_addrs.into_iter().collect(),
+            peer.max_heartbeat_interval,
+        );
+
+        if !peer.remote_addrs.is_empty() {
+            controller.initiate(now, public_key, peer.remote_addrs);
+        }
+    }
 
     let router = Router::new(&init_router_config);
-    let router_configurator = router.configurator();
 
     let tun_dev = hypertube::builder()
         .with_name(config.interface_name)
@@ -126,6 +140,7 @@ fn main() {
             });
         }
 
+        let router_configurator = router.configurator();
         loop {
             if shutdown.load(Ordering::Relaxed) {
                 log::info!("Received shutdown signal, waiting for workers to finish...");
