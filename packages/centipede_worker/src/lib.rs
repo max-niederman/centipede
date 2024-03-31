@@ -25,8 +25,9 @@ pub struct Worker<'r> {
     /// The underlying handle to the router.
     router_handle: WorkerHandle<'r>,
 
-    /// The sending half of the control message channel.
-    control_message_channel: mpsc::Sender<ControlMessage<Vec<u8>, auth::Unknown>>,
+    /// A callback for received control messages.
+    control_message_sink:
+        Box<dyn FnMut(SocketAddr, ControlMessage<Vec<u8>, auth::Unknown>) + Send + 'r>,
 
     /// The TUN queue.
     tun_queue: hypertube::Queue<'r, false>,
@@ -42,12 +43,14 @@ impl<'r> Worker<'r> {
     /// Create a new worker.
     pub fn new(
         router_handle: WorkerHandle<'r>,
-        control_message_channel: mpsc::Sender<ControlMessage<Vec<u8>, auth::Unknown>>,
+        control_message_sink: Box<
+            dyn FnMut(SocketAddr, ControlMessage<Vec<u8>, auth::Unknown>) + Send + 'r,
+        >,
         tun_queue: hypertube::Queue<'r, false>,
     ) -> Self {
         Self {
             router_handle,
-            control_message_channel,
+            control_message_sink,
             tun_queue,
             sockets: Sockets::new(),
             poll: mio::Poll::new().unwrap(),
@@ -151,8 +154,8 @@ impl<'r> Worker<'r> {
         let mut buf: [MaybeUninit<u8>; PACKET_BUFFER_SIZE] = MaybeUninit::uninit_array();
 
         loop {
-            match socket.recv(&mut buf) {
-                Ok(n) => {
+            match socket.recv_from(&mut buf) {
+                Ok((n, from)) => {
                     // SAFETY: we just read `n` bytes into the buffer.
                     let msg = unsafe { MaybeUninit::slice_assume_init_mut(&mut buf[..n]) };
 
@@ -166,9 +169,11 @@ impl<'r> Worker<'r> {
                                 }
                             };
 
-                            self.control_message_channel
-                                .send(control.to_vec_backed())
-                                .expect("failed to send control message");
+                            (self.control_message_sink)(
+                                from.as_socket()
+                                    .expect("socket should have an IP family address"),
+                                control.to_vec_backed(),
+                            )
                         }
                         Ok(MessageDiscriminant::Packet) => {
                             let packet = match PacketMessage::from_buffer(msg) {

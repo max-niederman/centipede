@@ -21,7 +21,7 @@ pub struct Centipede {
     /// Addresses on which the daemon should listen for incoming packets.
     pub recv_addrs: Vec<SocketAddr>,
 
-    /// Number of workers to spawn.
+    ///  of workers to spawn.
     #[serde(default = "num_cpus::get")]
     pub workers: usize,
 
@@ -35,6 +35,10 @@ pub struct Peer {
     /// Public key of the peer.
     #[serde_as(as = "Base64")]
     pub public_key: [u8; ed25519_dalek::PUBLIC_KEY_LENGTH],
+
+    // TODO: rename to make it clear that these are only for sending messages.
+    /// Local addresses from which to send messages to the peer.
+    pub local_addrs: Vec<SocketAddr>,
 
     /// Known remote addresses of the peer.
     pub remote_addrs: Vec<SocketAddr>,
