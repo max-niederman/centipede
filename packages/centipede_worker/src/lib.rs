@@ -5,12 +5,15 @@ use std::{
     io,
     mem::{self, MaybeUninit},
     os::fd::AsRawFd,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     task::Poll,
     time::Duration,
 };
 
-use centipede_proto::{MessageDiscriminant, PacketMessage};
+use centipede_proto::{marker::auth, ControlMessage, MessageDiscriminant, PacketMessage};
 use centipede_router::worker::{ConfigChanged, WorkerHandle};
 use mio::unix::SourceFd;
 use sockets::Sockets;
@@ -22,6 +25,9 @@ mod sockets;
 pub struct Worker<'r> {
     /// The underlying handle to the router.
     router_handle: WorkerHandle<'r>,
+
+    /// The sending half of the control message channel.
+    control_message_channel: mpsc::Sender<ControlMessage<Vec<u8>, auth::Unknown>>,
 
     /// The TUN queue.
     tun_queue: hypertube::Queue<'r, false>,
@@ -35,9 +41,14 @@ pub struct Worker<'r> {
 
 impl<'r> Worker<'r> {
     /// Create a new worker.
-    pub fn new(router_handle: WorkerHandle<'r>, tun_queue: hypertube::Queue<'r, false>) -> Self {
+    pub fn new(
+        router_handle: WorkerHandle<'r>,
+        control_message_channel: mpsc::Sender<ControlMessage<Vec<u8>, auth::Unknown>>,
+        tun_queue: hypertube::Queue<'r, false>,
+    ) -> Self {
         Self {
             router_handle,
+            control_message_channel,
             tun_queue,
             sockets: Sockets::new(),
             poll: mio::Poll::new().unwrap(),
@@ -148,7 +159,19 @@ impl<'r> Worker<'r> {
                     let msg = unsafe { MaybeUninit::slice_assume_init_mut(&mut buf[..n]) };
 
                     match centipede_proto::discriminate(&*msg) {
-                        Ok(MessageDiscriminant::Control) => todo!(),
+                        Ok(MessageDiscriminant::Control) => {
+                            let control = match ControlMessage::deserialize(&*msg) {
+                                Ok(control) => control,
+                                Err(e) => {
+                                    log::warn!("failed to parse packet message: {}", e);
+                                    continue;
+                                }
+                            };
+
+                            self.control_message_channel
+                                .send(control.to_vec_backed())
+                                .expect("failed to send control message");
+                        }
                         Ok(MessageDiscriminant::Packet) => {
                             let packet = match PacketMessage::from_buffer(msg) {
                                 Ok(packet) => packet,

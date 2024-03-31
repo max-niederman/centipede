@@ -112,6 +112,18 @@ where
     pub fn as_buffer(&self) -> &B {
         &self.buffer
     }
+
+    /// Copy the message's underlying buffer into a `Message<Vec<u8>, A>`.
+    pub fn to_vec_backed(self) -> Message<Vec<u8>, A> {
+        Message {
+            buffer: self.buffer.to_vec(),
+            sender: self.sender,
+            recipient: self.recipient,
+            signature: self.signature,
+            content: self.content,
+            _auth: PhantomData::<A>,
+        }
+    }
 }
 
 impl<B> Message<B, auth::Unknown>
