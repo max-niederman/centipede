@@ -562,7 +562,7 @@ impl<R: Rng + CryptoRng> Controller<R> {
                     ..
                 } = &mut state
                 {
-                    if !sending_to.insert(incoming.from) {
+                    if sending_to.insert(incoming.from) {
                         self.router_config
                             .send_tunnels
                             .get_mut(&public_key_to_peer_id(message.sender()))

@@ -30,11 +30,17 @@ impl Sockets {
     pub fn update(
         &mut self,
         addrs: impl Iterator<Item = SocketAddr>,
-    ) -> Result<UpdateStats, SocketsError> {
-        let mut stats = UpdateStats {
-            closed: 0,
-            kept: 0,
-            opened: 0,
+    ) -> Result<UpdateResults, SocketsError> {
+        enum SocketSource {
+            Kept,
+            Opened,
+            Duplicated,
+        }
+
+        let mut results = UpdateResults {
+            closed_count: 0,
+            kept_indices: Vec::new(),
+            opened_indices: Vec::new(),
         };
 
         let old_arena: Vec<_> =
@@ -45,33 +51,43 @@ impl Sockets {
         );
 
         for addr in addrs {
-            let socket = match old_by_local_addr.get(&addr) {
-                Some(&index) => {
-                    stats.kept += 1;
+            let (socket, source) = match old_by_local_addr.get(&addr) {
+                Some(&index) => (
                     old_arena[index]
                         .try_clone()
-                        .map_err(SocketsError::DuplicateSocketFd)?
-                }
-                None => match self.by_local_addr.get(&addr) {
-                    Some(&index) => self.arena[index]
-                        .try_clone()
                         .map_err(SocketsError::DuplicateSocketFd)?,
-                    None => {
-                        stats.opened += 1;
-                        bind_socket(addr).map_err(SocketsError::BindSocket)?
-                    }
+                    SocketSource::Kept,
+                ),
+                None => match self.by_local_addr.get(&addr) {
+                    Some(&index) => (
+                        self.arena[index]
+                            .try_clone()
+                            .map_err(SocketsError::DuplicateSocketFd)?,
+                        SocketSource::Duplicated,
+                    ),
+                    None => (
+                        bind_socket(addr).map_err(SocketsError::BindSocket)?,
+                        SocketSource::Opened,
+                    ),
                 },
             };
 
             let index = self.arena.len();
             self.arena.push(socket);
 
+            match source {
+                SocketSource::Kept => results.kept_indices.push(index),
+                SocketSource::Opened => results.opened_indices.push(index),
+                SocketSource::Duplicated => (),
+            }
+
             self.by_local_addr.insert(addr, index);
         }
 
-        stats.closed = old_by_local_addr.len() - (self.by_local_addr.len() - stats.opened);
+        results.closed_count =
+            old_by_local_addr.len() - (self.by_local_addr.len() - results.opened_indices.len());
 
-        Ok(stats)
+        Ok(results)
     }
 
     /// Resolve or bind a socket to a local address.
@@ -117,12 +133,30 @@ fn bind_socket(local_addr: SocketAddr) -> io::Result<Socket> {
     Ok(socket)
 }
 
-/// Statistics on the number of sockets closed, kept, and opened during an update.
+/// Lists of sockets closed, kept, and opened during an update.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateResults {
+    pub closed_count: usize,
+    pub kept_indices: Vec<usize>,
+    pub opened_indices: Vec<usize>,
+}
+
+/// Statistics of the number of sockets closed, kept, and opened during an update.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UpdateStats {
-    closed: usize,
-    kept: usize,
-    opened: usize,
+    pub closed: usize,
+    pub kept: usize,
+    pub opened: usize,
+}
+
+impl UpdateResults {
+    pub fn stats(&self) -> UpdateStats {
+        UpdateStats {
+            closed: self.closed_count,
+            kept: self.kept_indices.len(),
+            opened: self.opened_indices.len(),
+        }
+    }
 }
 
 #[derive(Debug, Error, Diagnostic)]
@@ -153,7 +187,7 @@ mod tests {
         let mut sockets = Sockets::new();
 
         assert_eq!(
-            sockets.update(iter::empty()).unwrap(),
+            sockets.update(iter::empty()).unwrap().stats(),
             UpdateStats {
                 closed: 0,
                 kept: 0,
@@ -171,7 +205,8 @@ mod tests {
         assert_eq!(
             sockets
                 .update([SocketAddr::from(([127, 0, 0, 1], PORT))].into_iter())
-                .expect("update sockets errored"),
+                .expect("update sockets errored")
+                .stats(),
             UpdateStats {
                 closed: 0,
                 kept: 0,
@@ -189,7 +224,8 @@ mod tests {
         assert_eq!(
             sockets
                 .update([SocketAddr::from(([127, 0, 0, 1], PORT))].into_iter())
-                .expect("update sockets errored"),
+                .expect("update sockets errored")
+                .stats(),
             UpdateStats {
                 closed: 0,
                 kept: 0,
@@ -200,7 +236,8 @@ mod tests {
         assert_eq!(
             sockets
                 .update([SocketAddr::from(([127, 0, 0, 1], PORT))].into_iter())
-                .expect("update sockets errored"),
+                .expect("update sockets errored")
+                .stats(),
             UpdateStats {
                 closed: 0,
                 kept: 1,
@@ -218,7 +255,8 @@ mod tests {
         assert_eq!(
             sockets
                 .update([SocketAddr::from(([127, 0, 0, 1], PORT))].into_iter())
-                .expect("update sockets errored"),
+                .expect("update sockets errored")
+                .stats(),
             UpdateStats {
                 closed: 0,
                 kept: 0,
@@ -229,7 +267,8 @@ mod tests {
         assert_eq!(
             sockets
                 .update([SocketAddr::from(([127, 0, 0, 1], PORT + 100))].into_iter())
-                .expect("update sockets errored"),
+                .expect("update sockets errored")
+                .stats(),
             UpdateStats {
                 closed: 1,
                 kept: 0,
@@ -247,7 +286,8 @@ mod tests {
         assert_eq!(
             sockets
                 .update([SocketAddr::from(([127, 0, 0, 1], PORT))].into_iter(),)
-                .expect("update sockets errored"),
+                .expect("update sockets errored")
+                .stats(),
             UpdateStats {
                 closed: 0,
                 kept: 0,

@@ -378,7 +378,7 @@ mod tests {
 
         assert_eq!(message.claimed_sequence_number(), 42);
         assert_eq!(message.claimed_sender(), [1; 8]);
-        assert_eq!(message.claimed_packet_plaintext(), &[]);
+        assert_eq!(message.claimed_packet_plaintext(), &[0u8; 0]);
 
         message.overwrite_packet(PACKET.iter().copied());
 

@@ -97,10 +97,11 @@ impl<'r> Worker<'r> {
 
     /// Handle a configuration change.
     fn handle_config_change(&mut self, change: ConfigChanged) -> Result<(), Error> {
-        self.sockets
+        let update = self
+            .sockets
             .update(change.recv_addrs().chain(change.send_addrs()))?;
 
-        for (i, _) in change.recv_addrs().enumerate() {
+        for i in update.opened_indices {
             self.poll
                 .registry()
                 .register(
