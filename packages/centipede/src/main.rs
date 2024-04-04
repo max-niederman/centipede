@@ -103,7 +103,7 @@ fn main() -> Result<()> {
                     .queue_nonblocking(0)
                     .into_diagnostic()
                     .wrap_err("failed to get TUN queue 0 (for the special first worker)")?,
-            );
+            )?;
 
             s.spawn(move || {
                 let mut events = mio::Events::with_capacity(1024);
@@ -158,7 +158,7 @@ fn main() -> Result<()> {
                     .queue_nonblocking(0)
                     .into_diagnostic()
                     .wrap_err_with(|| format!("failed to get TUN queue {}", i))?,
-            );
+            )?;
             s.spawn(move || {
                 let mut events = mio::Events::with_capacity(1024);
                 loop {
