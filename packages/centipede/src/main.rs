@@ -22,6 +22,11 @@ mod config;
 struct Opt {
     /// Path to config file.
     config: PathBuf,
+
+    /// Number of workers to spawn.
+    /// Defaults to the number of CPUs.
+    #[clap(long, short, default_value_t = num_cpus::get())]
+    workers: usize,
 }
 
 fn main() -> Result<()> {
@@ -68,7 +73,7 @@ fn main() -> Result<()> {
         .with_name(config.interface_name)
         .with_address(config.address.address())
         .with_netmask(config.address.network())
-        .with_num_queues(config.workers)
+        .with_num_queues(opt.workers)
         .build()
         .into_diagnostic()
         .wrap_err("failed to create tun device")?;
@@ -150,7 +155,7 @@ fn main() -> Result<()> {
             });
         }
 
-        for i in 1..config.workers {
+        for i in 1..opt.workers {
             let shutdown = shutdown.clone();
             let mut worker = Worker::new(
                 router.worker(),

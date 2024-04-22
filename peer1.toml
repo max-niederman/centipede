@@ -2,7 +2,6 @@ address = "10.0.10.1/24"
 private_key = "hteZOax4E+ELo6q5eSVoFAhh9awJudkYhzUJDvguNU0="
 recv_addrs = ["10.0.1.1:5000"]
 interface_name = "cp1"
-workers = 1
 
 [[peers]]
 public_key = "Wx0KV+g6TkuSIbUF/FUEztkchnRw7akTxJ8JV8QcJi0="
