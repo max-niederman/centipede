@@ -155,8 +155,7 @@ where
             signature: ed25519_dalek::Signature::from_bytes(
                 &buffer[SIGNATURE_RANGE].try_into().unwrap(),
             ),
-            content: serde_json::from_slice(&buffer[CONTENT_RANGE])
-                .map_err(ParseError::Content)?,
+            content: serde_json::from_slice(&buffer[CONTENT_RANGE]).map_err(ParseError::Content)?,
             buffer,
             _auth: PhantomData::<auth::Unknown>,
         })

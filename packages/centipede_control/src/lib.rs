@@ -75,9 +75,6 @@ enum PeerState {
         /// The timestamp of the handshake that established the connection, **on the initiator's clock**.
         handshake_timestamp: SystemTime,
 
-        /// The shared cipher.
-        cipher: ChaCha20Poly1305,
-
         /// Addreses on which we're listening for incoming packets, and are sending heartbeats from.
         local_addrs: HashSet<SocketAddr>,
 
@@ -107,7 +104,7 @@ impl<R: Rng + CryptoRng> Controller<R> {
     /// * `private_key` - the private key of the local peer.
     /// * `rng` - a cryptographic random number generator to use for generating ephemeral keys.
     pub fn new(
-        now: SystemTime,
+        _now: SystemTime,
         private_key: ed25519_dalek::SigningKey,
         rng: R,
     ) -> (Self, centipede_router::Config) {
@@ -187,7 +184,7 @@ impl<R: Rng + CryptoRng> Controller<R> {
                 ..
             }) => {
                 // Iterate over all the new addresses.
-                for &addr in local_addrs.difference(&state_local_addrs) {
+                for &addr in local_addrs.difference(state_local_addrs) {
                     // Queue a heartbeat for each new address.
                     queued_heartbeats.entry(now).or_default().insert(addr);
                 }
@@ -309,7 +306,7 @@ impl<R: Rng + CryptoRng> Controller<R> {
     ///
     /// * `now` - the current time.
     /// * `public_key` - the public key of the peer.
-    pub fn disconnect(&mut self, now: SystemTime, public_key: ed25519_dalek::VerifyingKey) {
+    pub fn disconnect(&mut self, _now: SystemTime, public_key: ed25519_dalek::VerifyingKey) {
         log::debug!("disconnecting from {public_key:?}");
 
         // Right now, we just clean up all references to the peer.
@@ -481,7 +478,6 @@ impl<R: Rng + CryptoRng> Controller<R> {
 
                 PeerState::Connected {
                     handshake_timestamp: *handshake_timestamp,
-                    cipher,
                     // Create the heartbeat queue, with the initial heartbeats queued.
                     queued_heartbeats: [(now, local_addrs.clone())].into_iter().collect(),
                     local_addrs,
@@ -574,7 +570,6 @@ impl<R: Rng + CryptoRng> Controller<R> {
 
                 PeerState::Connected {
                     handshake_timestamp,
-                    cipher,
                     // Create the heartbeat queue, with the initial heartbeats queued.
                     queued_heartbeats: [(now, local_addrs.clone())].into_iter().collect(),
                     local_addrs,

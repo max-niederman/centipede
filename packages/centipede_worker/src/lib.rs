@@ -26,8 +26,7 @@ pub struct Worker<'r> {
     router_handle: WorkerHandle<'r>,
 
     /// A callback for received control messages.
-    control_message_sink:
-        Box<dyn FnMut(SocketAddr, ControlMessage<Vec<u8>, auth::Unknown>) + Send + 'r>,
+    control_message_sink: Box<ControlMessageSink<'r>>,
 
     /// The TUN queue.
     tun_queue: hypertube::Queue<'r, false>,
@@ -39,13 +38,14 @@ pub struct Worker<'r> {
     poll: mio::Poll,
 }
 
+pub type ControlMessageSink<'r> =
+    dyn FnMut(SocketAddr, ControlMessage<Vec<u8>, auth::Unknown>) + Send + 'r;
+
 impl<'r> Worker<'r> {
     /// Create a new worker.
     pub fn new(
         router_handle: WorkerHandle<'r>,
-        control_message_sink: Box<
-            dyn FnMut(SocketAddr, ControlMessage<Vec<u8>, auth::Unknown>) + Send + 'r,
-        >,
+        control_message_sink: Box<ControlMessageSink<'r>>,
         tun_queue: hypertube::Queue<'r, false>,
     ) -> Result<Self, Error> {
         let poll = mio::Poll::new()?;
@@ -205,7 +205,8 @@ impl<'r> Worker<'r> {
 
                             if let Some(obligation) = self.router_handle.handle_incoming(packet) {
                                 // TODO: ensure writes complete
-                                self.tun_queue
+                                let _ = self
+                                    .tun_queue
                                     .write(obligation.packet())
                                     .map_err(Error::WriteTun)?;
                             }

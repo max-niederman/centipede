@@ -216,7 +216,8 @@ fn initiate() {
             for wait_to_initiate in [false, true] {
                 println!("testing initiate with clock = {clock:?}, pk = {private_key:?}, and wait_to_initiate = {wait_to_initiate}");
 
-                let (mut controller, _) = Controller::new(clock.now(), private_key.clone(), rng.clone());
+                let (mut controller, _) =
+                    Controller::new(clock.now(), private_key.clone(), rng.clone());
 
                 clock.increment(Duration::from_millis(1));
 

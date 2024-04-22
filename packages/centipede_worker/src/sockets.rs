@@ -150,6 +150,7 @@ pub struct UpdateStats {
 }
 
 impl UpdateResults {
+    #[cfg(test)]
     pub fn stats(&self) -> UpdateStats {
         UpdateStats {
             closed: self.closed_count,
