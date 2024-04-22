@@ -21,10 +21,6 @@ pub struct Centipede {
     /// Addresses on which the daemon should listen for incoming packets.
     pub recv_addrs: Vec<SocketAddr>,
 
-    ///  of workers to spawn.
-    #[serde(default = "num_cpus::get")]
-    pub workers: usize,
-
     /// List of peers.
     pub peers: Vec<Peer>,
 }
