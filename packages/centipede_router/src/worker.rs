@@ -64,9 +64,18 @@ impl<'r> WorkerHandle<'r> {
         let decrypted = message.decrypt_in_place(&tunnel.cipher).ok()?;
 
         match tunnel.memory.observe(decrypted.sequence_number()) {
-            PacketRecollection::New => Some(ReceivePacket { decrypted }),
-            PacketRecollection::Seen => None,
-            PacketRecollection::Confusing => None,
+            PacketRecollection::New => {
+                log::trace!("new packet observed, creating receive obligation");
+                Some(ReceivePacket { decrypted })
+            }
+            PacketRecollection::Seen => {
+                log::trace!("duplicate packet observed, ignoring");
+                None
+            }
+            PacketRecollection::Confusing => {
+                log::warn!("confusing packet observed, ignoring");
+                None
+            }
         }
     }
 
@@ -170,6 +179,8 @@ impl<'p> HandleOutgoing<'p> {
             .map(|tunnel| tunnel.links.iter())
             .unwrap_or_default();
 
+        log::trace!("creating outgoing packet coroutine with remaining links: {remaining_links:?}");
+
         Self {
             packet_plaintext: packet,
             router_state: Pin::new(router_state),
@@ -181,6 +192,8 @@ impl<'p> HandleOutgoing<'p> {
     // TODO: consider taking the scratch buffer by reference, so the caller doesn't have to `mem::take` it or similar.
     /// Resume the coroutine, yielding the next packet to send.
     pub fn resume(&mut self, scratch: Vec<u8>) -> Option<SendPacket> {
+        log::trace!("resuming outgoing packet coroutine");
+
         match self.remaining_links.next() {
             Some(&link) => {
                 let tunnel = *self.tunnels.peek()?;
@@ -192,12 +205,17 @@ impl<'p> HandleOutgoing<'p> {
                 message.overwrite_packet(self.packet_plaintext.iter().copied());
                 let message = message.encrypt_in_place(&tunnel.cipher);
 
+                log::trace!("creating obligation to send packet along {link:?}");
+
                 Some(SendPacket { link, message })
             }
             None => {
                 self.remaining_links = self.tunnels.peek()?.links.iter();
                 self.tunnels.next().unwrap();
-                None
+
+                log::trace!("advancing handle outgoing to next send tunnel");
+
+                self.resume(scratch)
             }
         }
     }

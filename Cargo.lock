@@ -142,6 +142,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
 
 [[package]]
+name = "base64"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9475866fec1451be56a3c2400fd081ff546538961565ccb5b7142cbd22bc7a51"
+
+[[package]]
 name = "base64ct"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -178,7 +184,7 @@ checksum = "8cd6604a82acf3039f1144f54b8eb34e91ffba622051189e71b781822d5ee1f5"
 name = "centipede"
 version = "0.1.0"
 dependencies = [
- "base64",
+ "base64 0.21.7",
  "centipede_control",
  "centipede_router",
  "centipede_worker",
@@ -203,6 +209,7 @@ dependencies = [
 name = "centipede_control"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.0",
  "centipede_proto",
  "centipede_router",
  "chacha20poly1305",
@@ -233,6 +240,7 @@ dependencies = [
  "arc-swap",
  "centipede_proto",
  "chacha20poly1305",
+ "log",
 ]
 
 [[package]]
@@ -1091,7 +1099,7 @@ version = "3.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "15d167997bd841ec232f5b2b8e0e26606df2e7caa4c31b95ea9ca52b200bd270"
 dependencies = [
- "base64",
+ "base64 0.21.7",
  "chrono",
  "hex",
  "indexmap 1.9.3",

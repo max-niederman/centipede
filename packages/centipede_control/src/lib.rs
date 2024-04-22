@@ -11,6 +11,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+use base64::prelude::*;
 use centipede_proto::{
     control::{Content, Message},
     marker::auth,
@@ -150,7 +151,10 @@ impl<R: Rng + CryptoRng> Controller<R> {
         local_addrs: HashSet<SocketAddr>,
         max_heartbeat_interval: Duration,
     ) {
-        log::debug!("listening for incoming connections from {public_key:?}");
+        log::debug!(
+            "listening for incoming connections from `{}`",
+            BASE64_STANDARD.encode(public_key)
+        );
 
         // Add the addresses to the router config, and mark it as changed if necessary.
         // This must happen for any current state of the peer,
@@ -238,7 +242,10 @@ impl<R: Rng + CryptoRng> Controller<R> {
         public_key: ed25519_dalek::VerifyingKey,
         remote_addrs: Vec<SocketAddr>,
     ) {
-        log::debug!("initiating connection to {public_key:?} at {remote_addrs:?}");
+        log::debug!(
+            "initiating connection to `{peer}` at {remote_addrs:?}",
+            peer = BASE64_STANDARD.encode(public_key)
+        );
 
         // Get the old state, ensuring that we know the peer.
         let old_state = self
@@ -353,7 +360,7 @@ impl<R: Rng + CryptoRng> Controller<R> {
         now: SystemTime,
         incoming: IncomingMessage<B>,
     ) {
-        log::debug!(
+        log::trace!(
             "handling incoming message from remote addr {:?} with claimed content {:?}",
             incoming.from,
             incoming.message.claimed_content(),
@@ -363,18 +370,23 @@ impl<R: Rng + CryptoRng> Controller<R> {
 
         // Check that the message even claims to be addressed to us.
         if incoming.message.claimed_recipient() != &self.private_key.verifying_key() {
+            log::warn!("received message not addressed to us");
             return;
         }
 
         // Check that we know the peer.
         if !self.peers.contains_key(incoming.message.claimed_sender()) {
+            log::warn!("received message from unknown peer");
             return;
         }
 
         // Now we verify the message's signature, and return if it's invalid.
         let message = match incoming.message.authenticate() {
             Ok(message) => message,
-            Err(_) => return,
+            Err(_) => {
+                log::warn!("received message with invalid signature");
+                return;
+            }
         };
 
         // Note that, since we haven't returned, the claimed sender and recipient are now guaranteed to
@@ -394,6 +406,16 @@ impl<R: Rng + CryptoRng> Controller<R> {
                     max_heartbeat_interval: tx_max_heartbeat_interval,
                 },
             ) if old_state.should_accept_incoming_initiate(*handshake_timestamp) => {
+                log::info!(
+                    "accepting incoming handshake from `{peer}` at address {from} and time {time}",
+                    peer = BASE64_STANDARD.encode(message.sender()),
+                    from = incoming.from,
+                    time = handshake_timestamp
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
+                );
+
                 // Since we want to accept the incoming initiate, we can forget the old state and extract the local addresses and the max heartbeat interval.
                 let (local_addrs, rx_max_heartbeat_interval) =
                     old_state.forget_connection_and_destructure();
@@ -403,6 +425,11 @@ impl<R: Rng + CryptoRng> Controller<R> {
                 let ecdh_public_key = (&ecdh_secret_key).into();
 
                 // Send the initiate acknowledgement.
+                log::debug!(
+                    "sending acknowledgements to `{peer}` from addresses {from:?}",
+                    peer = BASE64_STANDARD.encode(message.sender()),
+                    from = local_addrs
+                );
                 let response = Message::new(
                     &self.private_key,
                     *message.sender(),
@@ -427,7 +454,13 @@ impl<R: Rng + CryptoRng> Controller<R> {
                         .to_bytes(),
                 ));
 
+                log::debug!(
+                    "initializing send/receive tunnels to/from `{peer}`",
+                    peer = BASE64_STANDARD.encode(message.sender())
+                );
+
                 // Initialize the receiving tunnel.
+                // FIXME: reset packet memory
                 self.router_config.recv_tunnels.insert(
                     public_key_to_peer_id(message.sender()),
                     centipede_router::config::RecvTunnel {
@@ -435,6 +468,16 @@ impl<R: Rng + CryptoRng> Controller<R> {
                     },
                 );
                 self.router_config_changed = true;
+
+                // Initialize the sending tunnel, but without any links yet.
+                // We should only add links once we've received an initiate acknowledgement and know that the peer knows the cipher.
+                self.router_config.send_tunnels.insert(
+                    public_key_to_peer_id(message.sender()),
+                    centipede_router::config::SendTunnel {
+                        cipher: cipher.clone(),
+                        links: HashSet::new(),
+                    },
+                );
 
                 PeerState::Connected {
                     handshake_timestamp: *handshake_timestamp,
@@ -446,7 +489,7 @@ impl<R: Rng + CryptoRng> Controller<R> {
                     remote_addrs: [(now, [incoming.from].into_iter().collect())]
                         .into_iter()
                         .collect(),
-                    // However, we shouldn't send packets to it until we've received an initiate acknowledgement and know that the peer knows the cipher.
+                    // We have a send tunnel, but no links are associated with it yet.
                     sending_to: HashSet::new(),
                     // Use the max heartbeat interval from the `listen` call.
                     rx_max_heartbeat_interval,
@@ -476,6 +519,11 @@ impl<R: Rng + CryptoRng> Controller<R> {
                     max_heartbeat_interval: tx_max_heartbeat_interval,
                 },
             ) if handshake_timestamp == *peer_handshake_timestamp => {
+                log::info!(
+                    "received initiation acknowledgement from `{peer}`",
+                    peer = BASE64_STANDARD.encode(message.sender())
+                );
+
                 // Generate the cipher using the shared secret of the ECDH key exchange.
                 let cipher = ChaCha20Poly1305::new(&chacha20poly1305::Key::from(
                     ecdh_secret.diffie_hellman(peer_ecdh_public_key).to_bytes(),
@@ -545,6 +593,15 @@ impl<R: Rng + CryptoRng> Controller<R> {
             }
 
             (mut state, Content::Heartbeat) => {
+                log::debug!(
+                    "received heartbeat from `{peer}` at {time}",
+                    peer = BASE64_STANDARD.encode(message.sender()),
+                    time = now
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs()
+                );
+
                 // Delay expiration of the remote address.
                 if let PeerState::Connected { remote_addrs, .. }
                 | PeerState::Initiating { remote_addrs, .. } = &mut state
@@ -669,10 +726,10 @@ impl<R: Rng + CryptoRng> Controller<R> {
         }
 
         if self.router_config_changed {
-            log::debug!("poll resulted in router config change",);
+            log::trace!("poll resulted in router config change",);
         }
         if !self.send_queue.is_empty() {
-            log::debug!("poll resulted in sending messages: {:#?}", self.send_queue);
+            log::trace!("poll resulted in sending messages: {:#?}", self.send_queue);
         }
 
         Events {

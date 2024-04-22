@@ -145,7 +145,9 @@ fn listen() {
                 router_config
                     .send_tunnels
                     .get(&public_key_to_peer_id(&peer_key.verifying_key()))
-                    .is_none(),
+                    .expect("controller should have a send tunnel after listening for and receiving an incoming initiate")
+                    .links
+                    .is_empty(),
                 "controller cannot know where to send packets until receiving heartbeats"
             );
 
