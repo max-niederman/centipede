@@ -1,12 +1,8 @@
 use std::{
-    error::Error,
-    path::PathBuf,
-    sync::{
+    env, error::Error, path::PathBuf, sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc,
-    },
-    thread,
-    time::{Duration, SystemTime},
+    }, thread, time::{Duration, SystemTime}
 };
 
 use centipede_control::{Controller, IncomingMessage};
@@ -30,7 +26,11 @@ struct Opt {
 }
 
 fn main() -> Result<()> {
-    pretty_env_logger::init();
+    if env::var_os("RUST_LOG").is_none() {
+        env::set_var("RUST_LOG", "info");
+    }
+
+    pretty_env_logger::init_timed();
 
     let opt = <Opt as clap::Parser>::parse();
     log::debug!("opt: {:#?}", opt);
@@ -128,6 +128,8 @@ fn main() -> Result<()> {
 
             s.spawn(move || worker_loop(worker, i, shutdown, None));
         }
+
+        log::info!("spawned {} worker threads", opt.workers);
 
         let router_configurator = router.configurator();
         loop {

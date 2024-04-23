@@ -593,12 +593,8 @@ impl<R: Rng + CryptoRng> Controller<R> {
 
             (mut state, Content::Heartbeat) => {
                 log::debug!(
-                    "received heartbeat from `{peer}` at {time}",
-                    peer = BASE64_STANDARD.encode(message.sender()),
-                    time = now
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs()
+                    "received heartbeat from `{peer}`",
+                    peer = BASE64_STANDARD.encode(message.sender())
                 );
 
                 // Delay expiration of the remote address.
