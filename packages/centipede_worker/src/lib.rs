@@ -79,7 +79,7 @@ impl<'r> Worker<'r> {
         Ok(())
     }
 
-    /// Wait for at least one event and handle it.
+    /// Wait for an event and handle it, or time out after 100ms.
     ///
     /// Mutably borrows an event buffer for scratch space, to avoid reallocating it.
     pub fn wait_and_handle(&mut self, events: &mut mio::Events) -> Result<(), Error> {
@@ -89,7 +89,7 @@ impl<'r> Worker<'r> {
 
         events.clear();
         self.poll
-            .poll(events, Some(Duration::from_secs(1)))
+            .poll(events, Some(Duration::from_millis(100)))
             .map_err(Error::Poll)?;
 
         for event in &*events {
