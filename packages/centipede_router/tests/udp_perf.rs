@@ -1,7 +1,7 @@
 #![feature(test)]
 
 extern crate test;
-use std::{mem, net::UdpSocket, thread};
+use std::{mem, net::UdpSocket, thread, time::SystemTime};
 
 use centipede_proto::PacketMessage;
 use centipede_router::{config, Link, Router};
@@ -45,6 +45,7 @@ fn half_duplex_iter(packet_size: usize, num_packets: usize) {
                 recv_tunnels: [(
                     [0; 8],
                     config::RecvTunnel {
+                        initialized_at: SystemTime::UNIX_EPOCH,
                         cipher: dummy_cipher(),
                     },
                 )]
@@ -78,6 +79,7 @@ fn half_duplex_iter(packet_size: usize, num_packets: usize) {
                 send_tunnels: [(
                     [1; 8],
                     config::SendTunnel {
+                        initialized_at: SystemTime::UNIX_EPOCH,
                         links: [Link {
                             local: recv_addr,
                             remote: recv_addr,

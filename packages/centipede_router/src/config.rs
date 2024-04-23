@@ -1,7 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
-    net::SocketAddr,
-    sync::{atomic::AtomicU64, Arc},
+    collections::{HashMap, HashSet}, net::SocketAddr, sync::Arc, time::SystemTime
 };
 
 use chacha20poly1305::ChaCha20Poly1305;
@@ -27,6 +25,11 @@ pub struct Router {
 /// Configuration of a receiving tunnel.
 #[derive(Clone)]
 pub struct RecvTunnel {
+    // TODO: should this really be a time type or just an opaque identifier?
+    //       arguably the router shouldn't care about the time
+    /// Timestamp at which the tunnel was initialized. Used to reset the memory.
+    pub initialized_at: SystemTime,
+
     /// Cipher with which to decrypt messages.
     pub cipher: ChaCha20Poly1305,
 }
@@ -34,6 +37,9 @@ pub struct RecvTunnel {
 /// Configuration of a sending tunndfel.
 #[derive(Clone)]
 pub struct SendTunnel {
+    /// Timestamp at which the tunnel was initialized. Used to reset the sequence number.
+    pub initialized_at: SystemTime,
+
     /// Cipher with which to encrypt messages.
     pub cipher: ChaCha20Poly1305,
 
@@ -55,11 +61,13 @@ pub(crate) fn apply(config: &Router, state: &crate::ConfiguredRouter) -> crate::
                 (
                     *id,
                     crate::RecvTunnel {
+                        initialized_at: tun.initialized_at,
                         cipher: tun.cipher.clone(),
                         memory: state
                             .recv_tunnels
                             .get(id)
-                            .map(|tun| tun.memory.clone())
+                            .filter(|old| old.initialized_at == tun.initialized_at)
+                            .map(|old| old.memory.clone())
                             .unwrap_or_default(),
                     },
                 )
@@ -72,13 +80,15 @@ pub(crate) fn apply(config: &Router, state: &crate::ConfiguredRouter) -> crate::
                 (
                     *id,
                     crate::SendTunnel {
+                        initialized_at: tun.initialized_at,
                         links: tun.links.iter().copied().collect(),
                         cipher: tun.cipher.clone(),
                         next_sequence_number: state
                             .send_tunnels
                             .get(id)
-                            .map(|tun| tun.next_sequence_number.clone())
-                            .unwrap_or(Arc::new(AtomicU64::new(0))),
+                            .filter(|old| old.initialized_at == tun.initialized_at)
+                            .map(|old| old.next_sequence_number.clone())
+                            .unwrap_or_default()
                     },
                 )
             })
@@ -107,6 +117,8 @@ impl<'r> ConfiguratorHandle<'r> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use chacha20poly1305::KeyInit;
 
     use super::*;
@@ -154,6 +166,7 @@ mod tests {
                     map.insert(
                         [2; 8],
                         super::SendTunnel {
+                            initialized_at: SystemTime::UNIX_EPOCH,
                             cipher: ChaCha20Poly1305::new((&[0; 32]).into()),
                             links: [Link {
                                 local: SocketAddr::from(([127, 0, 0, 1], 0)),
@@ -199,6 +212,7 @@ mod tests {
                     map.insert(
                         [2; 8],
                         super::SendTunnel {
+                            initialized_at: SystemTime::UNIX_EPOCH,
                             cipher: ChaCha20Poly1305::new((&[0; 32]).into()),
                             links: [Link {
                                 local: SocketAddr::from(([127, 0, 0, 1], 0)),
@@ -222,6 +236,74 @@ mod tests {
     }
 
     #[test]
+    fn reinitializing_send_tunnel_resets_sequence() {
+        let mut state = crate::ConfiguredRouter::default();
+
+        state = apply(
+            &super::Router {
+                local_id: [1; 8],
+                recv_addrs: [SocketAddr::from(([127, 0, 0, 1], 0))]
+                    .into_iter()
+                    .collect(),
+                recv_tunnels: HashMap::new(),
+                send_tunnels: {
+                    let mut map = HashMap::new();
+                    map.insert(
+                        [2; 8],
+                        super::SendTunnel {
+                            initialized_at: SystemTime::UNIX_EPOCH,
+                            cipher: ChaCha20Poly1305::new((&[0; 32]).into()),
+                            links: [Link {
+                                local: SocketAddr::from(([127, 0, 0, 1], 0)),
+                                remote: SocketAddr::from(([127, 0, 0, 1], 0)),
+                            }]
+                            .into_iter()
+                            .collect(),
+                        },
+                    );
+                    map
+                },
+            },
+            &state,
+        );
+        let sequence = state.send_tunnels[&[2; 8]].next_sequence_number.as_ref() as *const _;
+
+        state = apply(
+            &super::Router {
+                local_id: [1; 8],
+                recv_addrs: [SocketAddr::from(([127, 0, 0, 1], 0))]
+                    .into_iter()
+                    .collect(),
+                recv_tunnels: HashMap::new(),
+                send_tunnels: {
+                    let mut map = HashMap::new();
+                    map.insert(
+                        [2; 8],
+                        super::SendTunnel {
+                            initialized_at: SystemTime::UNIX_EPOCH + Duration::from_secs(1),
+                            cipher: ChaCha20Poly1305::new((&[0; 32]).into()),
+                            links: [Link {
+                                local: SocketAddr::from(([127, 0, 0, 1], 0)),
+                                remote: SocketAddr::from(([127, 0, 0, 1], 0)),
+                            }]
+                            .into_iter()
+                            .collect(),
+                        },
+                    );
+                    map
+                },
+            },
+            &state,
+        );
+
+        assert_ne!(
+            state.send_tunnels[&[2; 8]].next_sequence_number.as_ref() as *const _,
+            sequence,
+            "sequence number generator was preserved"
+        );
+    }
+
+    #[test]
     fn updating_recv_tunnel_preserves_memory() {
         let mut state = crate::ConfiguredRouter::default();
 
@@ -236,6 +318,7 @@ mod tests {
                     map.insert(
                         [2; 8],
                         super::RecvTunnel {
+                            initialized_at: SystemTime::UNIX_EPOCH,
                             cipher: ChaCha20Poly1305::new((&[0; 32]).into()),
                         },
                     );
@@ -268,6 +351,7 @@ mod tests {
                     map.insert(
                         [2; 8],
                         super::RecvTunnel {
+                            initialized_at: SystemTime::UNIX_EPOCH,
                             cipher: ChaCha20Poly1305::new((&[1; 32]).into()),
                         },
                     );
@@ -283,6 +367,62 @@ mod tests {
             state.recv_tunnels[&[2; 8]].memory.as_ref() as *const _,
             memory,
             "packet memory was not preserved"
+        );
+    }
+
+    #[test]
+    fn reinitializing_recv_tunnel_resets_memory() {
+        let mut state = crate::ConfiguredRouter::default();
+
+        state = apply(
+            &super::Router {
+                local_id: [1; 8],
+                recv_addrs: [SocketAddr::from(([127, 0, 0, 1], 0))]
+                    .into_iter()
+                    .collect(),
+                recv_tunnels: {
+                    let mut map = HashMap::new();
+                    map.insert(
+                        [2; 8],
+                        super::RecvTunnel {
+                            initialized_at: SystemTime::UNIX_EPOCH,
+                            cipher: ChaCha20Poly1305::new((&[0; 32]).into()),
+                        },
+                    );
+                    map
+                },
+                send_tunnels: HashMap::new(),
+            },
+            &state,
+        );
+        let memory = state.recv_tunnels[&[2; 8]].memory.as_ref() as *const _;
+
+        state = apply(
+            &super::Router {
+                local_id: [1; 8],
+                recv_addrs: [SocketAddr::from(([127, 0, 0, 1], 0))]
+                    .into_iter()
+                    .collect(),
+                recv_tunnels: {
+                    let mut map = HashMap::new();
+                    map.insert(
+                        [2; 8],
+                        super::RecvTunnel {
+                            initialized_at: SystemTime::UNIX_EPOCH + Duration::from_secs(1),
+                            cipher: ChaCha20Poly1305::new((&[1; 32]).into()),
+                        },
+                    );
+                    map
+                },
+                send_tunnels: HashMap::new(),
+            },
+            &state,
+        );
+
+        assert_ne!(
+            state.recv_tunnels[&[2; 8]].memory.as_ref() as *const _,
+            memory,
+            "packet memory was preserved"
         );
     }
 }

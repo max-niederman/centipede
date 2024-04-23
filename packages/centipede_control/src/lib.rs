@@ -461,6 +461,7 @@ impl<R: Rng + CryptoRng> Controller<R> {
                 self.router_config.recv_tunnels.insert(
                     public_key_to_peer_id(message.sender()),
                     centipede_router::config::RecvTunnel {
+                        initialized_at: *handshake_timestamp,
                         cipher: cipher.clone(),
                     },
                 );
@@ -471,6 +472,7 @@ impl<R: Rng + CryptoRng> Controller<R> {
                 self.router_config.send_tunnels.insert(
                     public_key_to_peer_id(message.sender()),
                     centipede_router::config::SendTunnel {
+                        initialized_at: *handshake_timestamp,
                         cipher: cipher.clone(),
                         links: HashSet::new(),
                     },
@@ -529,6 +531,7 @@ impl<R: Rng + CryptoRng> Controller<R> {
                 self.router_config.recv_tunnels.insert(
                     public_key_to_peer_id(message.sender()),
                     centipede_router::config::RecvTunnel {
+                        initialized_at: handshake_timestamp,
                         cipher: cipher.clone(),
                     },
                 );
@@ -545,6 +548,7 @@ impl<R: Rng + CryptoRng> Controller<R> {
                 self.router_config.send_tunnels.insert(
                     public_key_to_peer_id(message.sender()),
                     centipede_router::config::SendTunnel {
+                        initialized_at: handshake_timestamp,
                         cipher: cipher.clone(),
                         links: local_addrs
                             .iter()

@@ -3,7 +3,7 @@ use std::{
     io,
     net::{SocketAddr, UdpSocket},
     thread,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 use centipede_proto::{
@@ -61,6 +61,7 @@ fn half_duplex_single_message() {
                         map.insert(
                             [1; 8],
                             config::SendTunnel {
+                                initialized_at: SystemTime::UNIX_EPOCH,
                                 cipher: dummy_cipher(),
                                 links: ctx.possible_links_to([1; 8]),
                             },
@@ -99,6 +100,7 @@ fn half_duplex_single_message() {
                         map.insert(
                             [0; 8],
                             config::RecvTunnel {
+                                initialized_at: SystemTime::UNIX_EPOCH,
                                 cipher: dummy_cipher(),
                             },
                         );

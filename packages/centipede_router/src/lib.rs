@@ -10,6 +10,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
+    time::SystemTime,
 };
 
 use arc_swap::ArcSwap;
@@ -52,6 +53,9 @@ struct ConfiguredRouter {
 /// The state of a receiving tunnel.
 #[derive(Clone)]
 struct RecvTunnel {
+    /// Timestamp at which the tunnel was initialized. Used to reset the memory.
+    initialized_at: SystemTime,
+
     /// Cipher with which to decrypt messages.
     cipher: ChaCha20Poly1305,
 
@@ -62,6 +66,9 @@ struct RecvTunnel {
 /// The state of a sending tunnel.
 #[derive(Clone)]
 struct SendTunnel {
+    /// Timestamp at which the tunnel was initialized. Used to reset the memory.
+    initialized_at: SystemTime,
+
     /// Address pairs on which to send messages.
     links: Vec<Link>,
 
