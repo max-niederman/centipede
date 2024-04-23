@@ -120,7 +120,7 @@ fn main() -> Result<()> {
                 router.worker(),
                 control_message_sink.clone(),
                 tun_dev
-                    .queue_nonblocking(0)
+                    .queue_nonblocking(i)
                     .into_diagnostic()
                     .wrap_err_with(|| format!("failed to get TUN queue {}", i))?,
             )
