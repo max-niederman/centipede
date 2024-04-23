@@ -1,5 +1,8 @@
 use std::{
-    collections::{HashMap, HashSet}, net::SocketAddr, sync::Arc, time::SystemTime
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+    sync::Arc,
+    time::SystemTime,
 };
 
 use chacha20poly1305::ChaCha20Poly1305;
@@ -88,7 +91,7 @@ pub(crate) fn apply(config: &Router, state: &crate::ConfiguredRouter) -> crate::
                             .get(id)
                             .filter(|old| old.initialized_at == tun.initialized_at)
                             .map(|old| old.next_sequence_number.clone())
-                            .unwrap_or_default()
+                            .unwrap_or_default(),
                     },
                 )
             })

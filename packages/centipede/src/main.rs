@@ -1,8 +1,13 @@
 use std::{
-    env, error::Error, path::PathBuf, sync::{
+    env,
+    error::Error,
+    path::PathBuf,
+    sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc,
-    }, thread, time::{Duration, SystemTime}
+    },
+    thread,
+    time::{Duration, SystemTime},
 };
 
 use centipede_control::{Controller, IncomingMessage};
