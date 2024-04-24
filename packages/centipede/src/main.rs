@@ -78,7 +78,9 @@ fn main() -> Result<()> {
         .with_name(config.interface_name)
         .with_address(config.address.address())
         .with_netmask(config.address.network())
+        .with_pi(false)
         .with_num_queues(opt.workers)
+        .with_up(true)
         .build()
         .into_diagnostic()
         .wrap_err("failed to create tun device")?;
