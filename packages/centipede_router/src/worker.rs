@@ -226,6 +226,7 @@ impl<'p> HandleOutgoing<'p> {
 /// to another peer on the Centipede network.
 #[must_use = "send packet obligation must be fulfilled"]
 pub struct SendPacket {
+    // TODO: make this a list so that we can send the same packet to multiple peers efficiently.
     /// The link to send the packet over.
     link: Link,
 

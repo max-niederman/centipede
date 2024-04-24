@@ -115,7 +115,7 @@ impl Sockets {
 
 /// Bind and configure a socket.
 fn bind_socket(local_addr: SocketAddr) -> io::Result<Socket> {
-    log::trace!("binding to {}", local_addr);
+    log::debug!("binding to {}", local_addr);
 
     // Create a new UDP socket.
     let socket = Socket::new(socket2::Domain::IPV4, socket2::Type::DGRAM, None)?;
