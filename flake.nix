@@ -47,5 +47,13 @@
           centipede = cargoNix.workspaceMembers.centipede.build;
           default = centipede;
         };
+
+        devShell = pkgs.mkShell {
+          name = "centipede";
+
+          packages = [
+            rust
+          ];
+        };
       });
 }
