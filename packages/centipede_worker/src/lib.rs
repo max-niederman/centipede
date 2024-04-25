@@ -150,6 +150,7 @@ impl<'r> Worker<'r> {
                         obligation.message().as_buffer(),
                         &obligation.link().remote.into(),
                     )
+                    .or_else(ignore_would_block)
                     .map_err(Error::WriteSocket)?;
 
                 write_buf = obligation.fulfill();
@@ -227,6 +228,14 @@ impl<'r> Worker<'r> {
 const TUN_TOKEN: mio::Token = mio::Token(usize::MAX);
 
 const PACKET_BUFFER_SIZE: usize = 65536;
+
+fn ignore_would_block<T: Default>(e: io::Error) -> io::Result<T> {
+    if e.kind() == io::ErrorKind::WouldBlock {
+        Ok(Default::default())
+    } else {
+        Err(e)
+    }
+}
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum Error {
