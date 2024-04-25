@@ -5,15 +5,35 @@
     nixpkgs.url = "github:NixOS/nixpkgs";
     flake-utils.url = "github:numtide/flake-utils";
     crate2nix.url = "github:nix-community/crate2nix";
+    rust-overlay.url = "github:oxalica/rust-overlay";
   };
 
-  outputs = { self, nixpkgs, flake-utils, crate2nix }:
+  nixConfig = {
+    extra-trusted-public-keys = "eigenvalue.cachix.org-1:ykerQDDa55PGxU25CETy9wF6uVDpadGGXYrFNJA3TUs=";
+    extra-substituters = "https://eigenvalue.cachix.org";
+    allow-import-from-derivation = true;
+  };
+
+  outputs = { self, nixpkgs, flake-utils, crate2nix, rust-overlay }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = nixpkgs.legacyPackages.${system};
-        cargoNix = crate2nix.tools.${system}.appliedCargoNix {
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ rust-overlay.overlays.default ];
+        };
+
+        rust = pkgs.rust-bin.selectLatestNightlyWith (toolchain: toolchain.default);
+
+        cargoNixPath = crate2nix.tools.${system}.generatedCargoNix {
           name = "centipede";
           src = ./.;
+        };
+        cargoNix = import cargoNixPath {
+          inherit pkgs;
+          buildRustCrateForPkgs = pkgs: pkgs.buildRustCrate.override {
+            cargo = rust;
+            rustc = rust;
+          };
         };
       in
       {
