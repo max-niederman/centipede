@@ -51,3 +51,13 @@ In addition to userspace state, Centipede creates TUN queues and sets of UDP soc
 Below are some benchmark results of Centipede against WireGuard's user- and kernel-space implementations.
 
 ![Benchmark results ](./benchmark.png)
+
+## Todo
+
+- [ ] Dynamic reconfigurability via an HTTP API and CLI wrapper over it.
+- [ ] Routing based on destination VPN address.
+- [ ] Path MTU discovery.
+- [ ] Bandwidth aggregation.
+- [ ] Traffic shaping.
+- [ ] Split into distinct transport and tunnel layers?
+- [ ] Android app.
