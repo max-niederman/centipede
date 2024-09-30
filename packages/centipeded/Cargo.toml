@@ -1,5 +1,5 @@
 [package]
-name = "centipede"
+name = "centipeded"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,15 +8,9 @@ base64 = "0.21.7"
 centipede_router = { version = "0.1.0", path = "../centipede_router" }
 centipede_worker = { version = "0.1.0", path = "../centipede_worker" }
 centipede_control = { version = "0.1.0", path = "../centipede_control" }
-cidr = { version = "0.2.2", features = ["serde"] }
 clap = { version = "4.5.4", features = ["derive"] }
-ed25519-dalek = { version = "2.1.0", features = ["serde"] }
 log = { version = "0.4.21", features = ["release_max_level_debug"] }
-num_cpus = "1.16.0"
 pretty_env_logger = "0.5.0"
-serde = { version = "1.0.195", features = ["derive"] }
-serde_with = { version = "3.5.0", features = ["base64"] }
-toml = "0.8.8"
 rand = "0.8.5"
 hypertube = "0.2.2"
 mio = "0.8.11"

@@ -1,0 +1,10 @@
+[package]
+name = "centipede_api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cidr = { version = "0.2.2", features = ["serde"] }
+ed25519-dalek = { version = "2.1.0", features = ["serde"] }
+num_cpus = "1.16.0"
+serde = { version = "1.0.195", features = ["derive"] }

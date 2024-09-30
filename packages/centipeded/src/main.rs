@@ -17,8 +17,6 @@ use miette::{Context, Diagnostic, IntoDiagnostic, Report, Result};
 use rand::thread_rng;
 use thiserror::Error;
 
-mod config;
-
 #[derive(Debug, clap::Parser)]
 struct Opt {
     /// Path to config file.
@@ -104,6 +102,10 @@ fn main() -> Result<()> {
         }
     })
     .expect("failed to set shutdown signal handler");
+
+    tokio::runtime::Builder::new_current_thread()
+        .build()
+        .into_diagnostic()?;
 
     thread::scope(|s| {
         {
